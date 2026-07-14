@@ -45,7 +45,7 @@
 
 import { execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { dirname, join, resolve } from "node:path";
 import { availableParallelism, hostname } from "node:os";
@@ -56,6 +56,7 @@ import { collectScoringStats, loadScoringStats } from "rangefind/scoring-stats";
 import { writeShardedRootManifest } from "rangefind/shards";
 import { readConfig } from "rangefind/config";
 import { createOsmIndexConfig } from "rangefind/osm/node";
+import { extractOsmPlaces } from "rangefind/osm/extract";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const WORK = join(projectRoot, "work");
@@ -63,7 +64,6 @@ const OUT = join(WORK, "public/rangefind");
 const STATE_PATH = join(WORK, "state.json");
 const LOCK_PATH = join(WORK, ".lock");
 const STATS_DIR = join(WORK, "scoring-stats");
-const RANGEFIND_PKG = join(projectRoot, "node_modules/rangefind");
 
 function parseArgs(argv) {
   const args = {
@@ -224,11 +224,13 @@ async function refreshPbf(region, state) {
   const head = await fetch(url, { method: "HEAD" });
   if (!head.ok) throw new Error(`${region.id}: HEAD ${url} → ${head.status}`);
   const lastModified = head.headers.get("last-modified") || "";
-  const known = state.regions[region.id]?.pbfLastModified;
-  // The PBF gets deleted after a successful publish; only re-download when
-  // upstream actually changed or no corpus survives locally.
-  const current = lastModified && lastModified === known;
-  if (current && (existsSync(region.pbf) || hasCorpus(region))) return;
+  const entry = state.regions[region.id] || {};
+  // The PBF gets deleted after a successful publish; re-download only when
+  // upstream changed, or when extraction still needs it (stale/lost
+  // extraction state) and the file is gone.
+  const current = lastModified && lastModified === entry.pbfLastModified;
+  const extractionCurrent = entry.extractIdentity === lastModified && hasCorpus(region);
+  if (current && (existsSync(region.pbf) || extractionCurrent)) return;
 
   log(`${region.id}: downloading ${url} (${lastModified || "unknown date"})`);
   mkdirSync(dirname(region.pbf), { recursive: true });
@@ -254,7 +256,7 @@ async function refreshPbf(region, state) {
 
 // --- step 2: extract JSONL ---------------------------------------------------
 
-function extractJsonl(region, state) {
+async function extractJsonl(region, state) {
   const entry = state.regions[region.id] || (state.regions[region.id] = {});
   const identity = pbfIdentity(region, state);
   if (entry.extractIdentity === identity && hasCorpus(region)) return false;
@@ -264,17 +266,12 @@ function extractJsonl(region, state) {
   // The compressed snapshot stays: it is the corpus the built shard
   // reflects and the base the delta diff runs against. Cleanup replaces it
   // only after the shard is rebuilt/updated and uploaded.
-  // realpath: through the symlinked node_modules the script's run-as-main
-  // guard would otherwise not fire.
-  const script = realpathSync(join(RANGEFIND_PKG, "scripts/osm_fixture.mjs"));
-  execFileSync(process.execPath, [
-    script, "jsonl",
-    `--region=${region.id}`,
-    `--pbf=${region.pbf}`,
-    `--root=${regionWorkRoot(region)}`,
-    "--no-rqa"
-  ], { stdio: "inherit" });
-  const meta = loadJson(join(regionWorkRoot(region), "data/osm-places.meta.json"), {});
+  const meta = await extractOsmPlaces({
+    region: region.id,
+    pbf: region.pbf,
+    root: regionWorkRoot(region),
+    rqa: false
+  });
   entry.docs = Number(meta.docs || 0);
   entry.extractIdentity = identity;
   entry.overrides = region.overrides || null;
@@ -335,7 +332,7 @@ function statsPath() {
   return join(STATS_DIR, "scoring-stats.json");
 }
 
-async function ensureScoringStats(regions, options, state, force) {
+async function ensureScoringStats(regions, options, state, force, allowRegen = true) {
   const current = existsSync(statsPath()) ? loadScoringStats(statsPath()) : null;
   const wantedIds = regions.map(region => region.id).sort();
   const currentIds = (current?.inputs || []).map(input => input.id).sort();
@@ -347,6 +344,11 @@ async function ensureScoringStats(regions, options, state, force) {
     : drift > options.statsDriftRatio ? `corpus drift ${(drift * 100).toFixed(1)}%`
     : null;
   if (!reason) return;
+  if (!allowRegen) {
+    // A --regions-scoped run must never regenerate the artifact: it would
+    // freeze statistics over the subset and break cross-shard scoring.
+    throw new Error(`scoring stats need regeneration (${reason}) — run without --regions.`);
+  }
 
   log(`scoring-stats: regenerating (${reason}) — this invalidates every shard build`);
   for (const region of regions) await ensurePlainJsonl(region);
@@ -618,7 +620,7 @@ async function main() {
     if (outOfTime()) break;
     try {
       await refreshPbf(region, state);
-      if (extractJsonl(region, state)) {
+      if (await extractJsonl(region, state)) {
         log(`${region.id}: corpus refreshed (${(state.regions[region.id].docs || 0).toLocaleString()} docs)`);
         if (!state.regions[region.id].builtFingerprint) {
           // Bring-up acquisition: no shard exists yet, so the corpus is not
@@ -645,7 +647,7 @@ async function main() {
     log(`Acquisition phase: ${ready.length}/${regions.length} corpora present — builds start when all are acquired (pass --partial to build with a subset).`);
     return;
   }
-  await ensureScoringStats(ready, options, state, args.forceStats);
+  await ensureScoringStats(ready, options, state, args.forceStats, !args.regions);
 
   // 4: rebuild stale shards until the deadline.
   const stale = ready.filter(region => {
