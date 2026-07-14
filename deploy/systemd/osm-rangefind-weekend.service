@@ -1,0 +1,13 @@
+[Unit]
+Description=OSM Rangefind weekend indexing window
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/srv/osm-rangefind-index
+Environment=INDEX_LOG_FILE=logs/weekend.log
+ExecStart=/srv/osm-rangefind-index/scripts/nightly.sh --max-hours 54
+

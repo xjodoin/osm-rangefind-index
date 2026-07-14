@@ -1,0 +1,11 @@
+[Unit]
+Description=Run OSM Rangefind over the weekend (Montreal time)
+
+[Timer]
+OnCalendar=Sat *-*-* 00:15:00 America/Montreal
+AccuracySec=1min
+Unit=osm-rangefind-weekend.service
+
+[Install]
+WantedBy=timers.target
+

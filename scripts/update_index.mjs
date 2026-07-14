@@ -647,7 +647,10 @@ async function main() {
     log(`Acquisition phase: ${ready.length}/${regions.length} corpora present — builds start when all are acquired (pass --partial to build with a subset).`);
     return;
   }
-  await ensureScoringStats(ready, options, state, args.forceStats, !args.regions);
+  // Region-scoped runs normally preserve the planet-wide artifact. An
+  // explicit --partial run is the deliberate exception used for bring-up
+  // and smoke tests; the next full run will regenerate stats for all regions.
+  await ensureScoringStats(ready, options, state, args.forceStats, !args.regions || args.partial);
 
   // 4: rebuild stale shards until the deadline.
   const stale = ready.filter(region => {

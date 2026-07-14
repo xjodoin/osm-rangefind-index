@@ -77,16 +77,17 @@ npm run update -- --prune             # occasional: delete unreferenced packs on
 
 ```cron
 # Weeknights: start 22:15, hand the server back before 06:15.
-15 22 * * 0-4  /srv/osm-rangefind-index/scripts/nightly.sh --deadline 06:15 >> /srv/osm-rangefind-index/logs/nightly.log 2>&1
+15 22 * * 0-4  /usr/bin/env INDEX_LOG_FILE=logs/nightly.log /srv/osm-rangefind-index/scripts/nightly.sh --deadline 06:15
 
 # Weekend: start Saturday 00:15, run up to 54h (until ~Mon 06:15).
-15 0 * * 6     /srv/osm-rangefind-index/scripts/nightly.sh --max-hours 54    >> /srv/osm-rangefind-index/logs/weekend.log 2>&1
+15 0 * * 6     /usr/bin/env INDEX_LOG_FILE=logs/weekend.log /srv/osm-rangefind-index/scripts/nightly.sh --max-hours 54
 ```
 
 A lockfile prevents overlapping runs (a weekend run still going Monday keeps
 the nightly one from starting). `nightly.sh` runs everything under
 `nice`/`ionice`, so an early return of daytime load mostly just slows the
-build.
+build. The launcher tees all progress and errors to `logs/indexing.log` by
+default; `INDEX_LOG_FILE` selects a different file as shown above.
 
 ## How incremental updates work
 
