@@ -15,7 +15,7 @@ content-addressed, so `rclone` skips unchanged objects).
 ## Setup
 
 ```sh
-npm install                       # links ../rangefind
+npm install                       # rangefind ^0.3.0 from npm
 cp .env.example .env              # fill in R2 credentials / remote
 chmod +x scripts/nightly.sh
 # edit regions.json — one entry per shard (Geofabrik path)
