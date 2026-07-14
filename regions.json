@@ -1,0 +1,2287 @@
+{
+  "//": "Each region becomes one shard. `geofabrik` is the path under https://download.geofabrik.de/ (region id = last path segment). Optional `pbf` pins a local file instead of downloading (useful for tests). Optional `overrides` merges into the shard's rangefind config.",
+  "regions": [
+    {
+      "id": "afghanistan",
+      "geofabrik": "asia/afghanistan",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "alabama",
+      "geofabrik": "north-america/us/alabama",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "alaska",
+      "geofabrik": "north-america/us/alaska",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "albania",
+      "geofabrik": "europe/albania",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "alberta",
+      "geofabrik": "north-america/canada/alberta",
+      "groups": [
+        "canada",
+        "north-america"
+      ]
+    },
+    {
+      "id": "algeria",
+      "geofabrik": "africa/algeria",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "alsace",
+      "geofabrik": "europe/france/alsace",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "american-oceania",
+      "geofabrik": "australia-oceania/american-oceania",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "andorra",
+      "geofabrik": "europe/andorra",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "angola",
+      "geofabrik": "africa/angola",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "antarctica",
+      "geofabrik": "antarctica"
+    },
+    {
+      "id": "aquitaine",
+      "geofabrik": "europe/france/aquitaine",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "argentina",
+      "geofabrik": "south-america/argentina",
+      "groups": [
+        "south-america"
+      ]
+    },
+    {
+      "id": "arizona",
+      "geofabrik": "north-america/us/arizona",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "arkansas",
+      "geofabrik": "north-america/us/arkansas",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "armenia",
+      "geofabrik": "asia/armenia",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "australia",
+      "geofabrik": "australia-oceania/australia",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "austria",
+      "geofabrik": "europe/austria",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "auvergne",
+      "geofabrik": "europe/france/auvergne",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "azerbaijan",
+      "geofabrik": "asia/azerbaijan",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "azores",
+      "geofabrik": "europe/azores",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "baden-wuerttemberg",
+      "geofabrik": "europe/germany/baden-wuerttemberg",
+      "groups": [
+        "germany",
+        "europe"
+      ]
+    },
+    {
+      "id": "bahamas",
+      "geofabrik": "central-america/bahamas",
+      "groups": [
+        "central-america"
+      ]
+    },
+    {
+      "id": "bangladesh",
+      "geofabrik": "asia/bangladesh",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "basse-normandie",
+      "geofabrik": "europe/france/basse-normandie",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "bayern",
+      "geofabrik": "europe/germany/bayern",
+      "groups": [
+        "germany",
+        "europe"
+      ]
+    },
+    {
+      "id": "belarus",
+      "geofabrik": "europe/belarus",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "belgium",
+      "geofabrik": "europe/belgium",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "belize",
+      "geofabrik": "central-america/belize",
+      "groups": [
+        "central-america"
+      ]
+    },
+    {
+      "id": "benin",
+      "geofabrik": "africa/benin",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "berlin",
+      "geofabrik": "europe/germany/berlin",
+      "groups": [
+        "germany",
+        "europe"
+      ]
+    },
+    {
+      "id": "bhutan",
+      "geofabrik": "asia/bhutan",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "bolivia",
+      "geofabrik": "south-america/bolivia",
+      "groups": [
+        "south-america"
+      ]
+    },
+    {
+      "id": "bosnia-herzegovina",
+      "geofabrik": "europe/bosnia-herzegovina",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "botswana",
+      "geofabrik": "africa/botswana",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "bourgogne",
+      "geofabrik": "europe/france/bourgogne",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "brandenburg",
+      "geofabrik": "europe/germany/brandenburg",
+      "groups": [
+        "germany",
+        "europe"
+      ]
+    },
+    {
+      "id": "brazil",
+      "geofabrik": "south-america/brazil",
+      "groups": [
+        "south-america"
+      ]
+    },
+    {
+      "id": "bremen",
+      "geofabrik": "europe/germany/bremen",
+      "groups": [
+        "germany",
+        "europe"
+      ]
+    },
+    {
+      "id": "bretagne",
+      "geofabrik": "europe/france/bretagne",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "british-columbia",
+      "geofabrik": "north-america/canada/british-columbia",
+      "groups": [
+        "canada",
+        "north-america"
+      ]
+    },
+    {
+      "id": "bulgaria",
+      "geofabrik": "europe/bulgaria",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "burkina-faso",
+      "geofabrik": "africa/burkina-faso",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "burundi",
+      "geofabrik": "africa/burundi",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "california",
+      "geofabrik": "north-america/us/california",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "cambodia",
+      "geofabrik": "asia/cambodia",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "cameroon",
+      "geofabrik": "africa/cameroon",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "canary-islands",
+      "geofabrik": "africa/canary-islands",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "cape-verde",
+      "geofabrik": "africa/cape-verde",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "central-african-republic",
+      "geofabrik": "africa/central-african-republic",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "central-fed-district",
+      "geofabrik": "russia/central-fed-district",
+      "groups": [
+        "russia"
+      ]
+    },
+    {
+      "id": "centre",
+      "geofabrik": "europe/france/centre",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "chad",
+      "geofabrik": "africa/chad",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "champagne-ardenne",
+      "geofabrik": "europe/france/champagne-ardenne",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "chile",
+      "geofabrik": "south-america/chile",
+      "groups": [
+        "south-america"
+      ]
+    },
+    {
+      "id": "china",
+      "geofabrik": "asia/china",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "colombia",
+      "geofabrik": "south-america/colombia",
+      "groups": [
+        "south-america"
+      ]
+    },
+    {
+      "id": "colorado",
+      "geofabrik": "north-america/us/colorado",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "comores",
+      "geofabrik": "africa/comores",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "congo-brazzaville",
+      "geofabrik": "africa/congo-brazzaville",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "congo-democratic-republic",
+      "geofabrik": "africa/congo-democratic-republic",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "connecticut",
+      "geofabrik": "north-america/us/connecticut",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "cook-islands",
+      "geofabrik": "australia-oceania/cook-islands",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "corse",
+      "geofabrik": "europe/france/corse",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "costa-rica",
+      "geofabrik": "central-america/costa-rica",
+      "groups": [
+        "central-america"
+      ]
+    },
+    {
+      "id": "crimean-fed-district",
+      "geofabrik": "russia/crimean-fed-district",
+      "groups": [
+        "russia"
+      ]
+    },
+    {
+      "id": "croatia",
+      "geofabrik": "europe/croatia",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "cuba",
+      "geofabrik": "central-america/cuba",
+      "groups": [
+        "central-america"
+      ]
+    },
+    {
+      "id": "cyprus",
+      "geofabrik": "europe/cyprus",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "czech-republic",
+      "geofabrik": "europe/czech-republic",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "delaware",
+      "geofabrik": "north-america/us/delaware",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "denmark",
+      "geofabrik": "europe/denmark",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "district-of-columbia",
+      "geofabrik": "north-america/us/district-of-columbia",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "djibouti",
+      "geofabrik": "africa/djibouti",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "east-timor",
+      "geofabrik": "asia/east-timor",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "ecuador",
+      "geofabrik": "south-america/ecuador",
+      "groups": [
+        "south-america"
+      ]
+    },
+    {
+      "id": "egypt",
+      "geofabrik": "africa/egypt",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "el-salvador",
+      "geofabrik": "central-america/el-salvador",
+      "groups": [
+        "central-america"
+      ]
+    },
+    {
+      "id": "equatorial-guinea",
+      "geofabrik": "africa/equatorial-guinea",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "eritrea",
+      "geofabrik": "africa/eritrea",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "estonia",
+      "geofabrik": "europe/estonia",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "ethiopia",
+      "geofabrik": "africa/ethiopia",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "far-eastern-fed-district",
+      "geofabrik": "russia/far-eastern-fed-district",
+      "groups": [
+        "russia"
+      ]
+    },
+    {
+      "id": "faroe-islands",
+      "geofabrik": "europe/faroe-islands",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "fiji",
+      "geofabrik": "australia-oceania/fiji",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "finland",
+      "geofabrik": "europe/finland",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "florida",
+      "geofabrik": "north-america/us/florida",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "franche-comte",
+      "geofabrik": "europe/france/franche-comte",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "gabon",
+      "geofabrik": "africa/gabon",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "gcc-states",
+      "geofabrik": "asia/gcc-states",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "georgia",
+      "geofabrik": "europe/georgia",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "us-georgia",
+      "geofabrik": "north-america/us/georgia",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "ghana",
+      "geofabrik": "africa/ghana",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "great-britain",
+      "geofabrik": "europe/great-britain",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "greece",
+      "geofabrik": "europe/greece",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "greenland",
+      "geofabrik": "north-america/greenland",
+      "groups": [
+        "north-america"
+      ]
+    },
+    {
+      "id": "guadeloupe",
+      "geofabrik": "europe/france/guadeloupe",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "guatemala",
+      "geofabrik": "central-america/guatemala",
+      "groups": [
+        "central-america"
+      ]
+    },
+    {
+      "id": "guernsey-jersey",
+      "geofabrik": "europe/guernsey-jersey",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "guinea",
+      "geofabrik": "africa/guinea",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "guinea-bissau",
+      "geofabrik": "africa/guinea-bissau",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "guyana",
+      "geofabrik": "south-america/guyana",
+      "groups": [
+        "south-america"
+      ]
+    },
+    {
+      "id": "guyane",
+      "geofabrik": "europe/france/guyane",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "haiti-and-domrep",
+      "geofabrik": "central-america/haiti-and-domrep",
+      "groups": [
+        "central-america"
+      ]
+    },
+    {
+      "id": "hamburg",
+      "geofabrik": "europe/germany/hamburg",
+      "groups": [
+        "germany",
+        "europe"
+      ]
+    },
+    {
+      "id": "haute-normandie",
+      "geofabrik": "europe/france/haute-normandie",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "hawaii",
+      "geofabrik": "north-america/us/hawaii",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "hessen",
+      "geofabrik": "europe/germany/hessen",
+      "groups": [
+        "germany",
+        "europe"
+      ]
+    },
+    {
+      "id": "honduras",
+      "geofabrik": "central-america/honduras",
+      "groups": [
+        "central-america"
+      ]
+    },
+    {
+      "id": "hungary",
+      "geofabrik": "europe/hungary",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "iceland",
+      "geofabrik": "europe/iceland",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "idaho",
+      "geofabrik": "north-america/us/idaho",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "ile-de-clipperton",
+      "geofabrik": "australia-oceania/ile-de-clipperton",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "ile-de-france",
+      "geofabrik": "europe/france/ile-de-france",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "illinois",
+      "geofabrik": "north-america/us/illinois",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "india",
+      "geofabrik": "asia/india",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "indiana",
+      "geofabrik": "north-america/us/indiana",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "indonesia",
+      "geofabrik": "asia/indonesia",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "iowa",
+      "geofabrik": "north-america/us/iowa",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "iran",
+      "geofabrik": "asia/iran",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "iraq",
+      "geofabrik": "asia/iraq",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "ireland-and-northern-ireland",
+      "geofabrik": "europe/ireland-and-northern-ireland",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "isle-of-man",
+      "geofabrik": "europe/isle-of-man",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "israel-and-palestine",
+      "geofabrik": "asia/israel-and-palestine",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "italy",
+      "geofabrik": "europe/italy",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "ivory-coast",
+      "geofabrik": "africa/ivory-coast",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "jamaica",
+      "geofabrik": "central-america/jamaica",
+      "groups": [
+        "central-america"
+      ]
+    },
+    {
+      "id": "japan",
+      "geofabrik": "asia/japan",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "jordan",
+      "geofabrik": "asia/jordan",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "kaliningrad",
+      "geofabrik": "russia/kaliningrad",
+      "groups": [
+        "russia"
+      ]
+    },
+    {
+      "id": "kansas",
+      "geofabrik": "north-america/us/kansas",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "kazakhstan",
+      "geofabrik": "asia/kazakhstan",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "kentucky",
+      "geofabrik": "north-america/us/kentucky",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "kenya",
+      "geofabrik": "africa/kenya",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "kiribati",
+      "geofabrik": "australia-oceania/kiribati",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "kosovo",
+      "geofabrik": "europe/kosovo",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "kyrgyzstan",
+      "geofabrik": "asia/kyrgyzstan",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "languedoc-roussillon",
+      "geofabrik": "europe/france/languedoc-roussillon",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "laos",
+      "geofabrik": "asia/laos",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "latvia",
+      "geofabrik": "europe/latvia",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "lebanon",
+      "geofabrik": "asia/lebanon",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "lesotho",
+      "geofabrik": "africa/lesotho",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "liberia",
+      "geofabrik": "africa/liberia",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "libya",
+      "geofabrik": "africa/libya",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "liechtenstein",
+      "geofabrik": "europe/liechtenstein",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "limousin",
+      "geofabrik": "europe/france/limousin",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "lithuania",
+      "geofabrik": "europe/lithuania",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "lorraine",
+      "geofabrik": "europe/france/lorraine",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "louisiana",
+      "geofabrik": "north-america/us/louisiana",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "luxembourg",
+      "geofabrik": "europe/luxembourg",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "macedonia",
+      "geofabrik": "europe/macedonia",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "madagascar",
+      "geofabrik": "africa/madagascar",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "maine",
+      "geofabrik": "north-america/us/maine",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "malawi",
+      "geofabrik": "africa/malawi",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "malaysia-singapore-brunei",
+      "geofabrik": "asia/malaysia-singapore-brunei",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "maldives",
+      "geofabrik": "asia/maldives",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "mali",
+      "geofabrik": "africa/mali",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "malta",
+      "geofabrik": "europe/malta",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "manitoba",
+      "geofabrik": "north-america/canada/manitoba",
+      "groups": [
+        "canada",
+        "north-america"
+      ]
+    },
+    {
+      "id": "marshall-islands",
+      "geofabrik": "australia-oceania/marshall-islands",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "martinique",
+      "geofabrik": "europe/france/martinique",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "maryland",
+      "geofabrik": "north-america/us/maryland",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "massachusetts",
+      "geofabrik": "north-america/us/massachusetts",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "mauritania",
+      "geofabrik": "africa/mauritania",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "mauritius",
+      "geofabrik": "africa/mauritius",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "mayotte",
+      "geofabrik": "europe/france/mayotte",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "mecklenburg-vorpommern",
+      "geofabrik": "europe/germany/mecklenburg-vorpommern",
+      "groups": [
+        "germany",
+        "europe"
+      ]
+    },
+    {
+      "id": "mexico",
+      "geofabrik": "north-america/mexico",
+      "groups": [
+        "north-america"
+      ]
+    },
+    {
+      "id": "michigan",
+      "geofabrik": "north-america/us/michigan",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "micronesia",
+      "geofabrik": "australia-oceania/micronesia",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "midi-pyrenees",
+      "geofabrik": "europe/france/midi-pyrenees",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "minnesota",
+      "geofabrik": "north-america/us/minnesota",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "mississippi",
+      "geofabrik": "north-america/us/mississippi",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "missouri",
+      "geofabrik": "north-america/us/missouri",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "moldova",
+      "geofabrik": "europe/moldova",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "monaco",
+      "geofabrik": "europe/monaco",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "mongolia",
+      "geofabrik": "asia/mongolia",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "montana",
+      "geofabrik": "north-america/us/montana",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "montenegro",
+      "geofabrik": "europe/montenegro",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "morocco",
+      "geofabrik": "africa/morocco",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "mozambique",
+      "geofabrik": "africa/mozambique",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "myanmar",
+      "geofabrik": "asia/myanmar",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "namibia",
+      "geofabrik": "africa/namibia",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "nauru",
+      "geofabrik": "australia-oceania/nauru",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "nebraska",
+      "geofabrik": "north-america/us/nebraska",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "nepal",
+      "geofabrik": "asia/nepal",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "netherlands",
+      "geofabrik": "europe/netherlands",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "nevada",
+      "geofabrik": "north-america/us/nevada",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "new-brunswick",
+      "geofabrik": "north-america/canada/new-brunswick",
+      "groups": [
+        "canada",
+        "north-america"
+      ]
+    },
+    {
+      "id": "new-caledonia",
+      "geofabrik": "australia-oceania/new-caledonia",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "new-hampshire",
+      "geofabrik": "north-america/us/new-hampshire",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "new-jersey",
+      "geofabrik": "north-america/us/new-jersey",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "new-mexico",
+      "geofabrik": "north-america/us/new-mexico",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "new-york",
+      "geofabrik": "north-america/us/new-york",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "new-zealand",
+      "geofabrik": "australia-oceania/new-zealand",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "newfoundland-and-labrador",
+      "geofabrik": "north-america/canada/newfoundland-and-labrador",
+      "groups": [
+        "canada",
+        "north-america"
+      ]
+    },
+    {
+      "id": "nicaragua",
+      "geofabrik": "central-america/nicaragua",
+      "groups": [
+        "central-america"
+      ]
+    },
+    {
+      "id": "niedersachsen",
+      "geofabrik": "europe/germany/niedersachsen",
+      "groups": [
+        "germany",
+        "europe"
+      ]
+    },
+    {
+      "id": "niger",
+      "geofabrik": "africa/niger",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "nigeria",
+      "geofabrik": "africa/nigeria",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "niue",
+      "geofabrik": "australia-oceania/niue",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "nord-pas-de-calais",
+      "geofabrik": "europe/france/nord-pas-de-calais",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "nordrhein-westfalen",
+      "geofabrik": "europe/germany/nordrhein-westfalen",
+      "groups": [
+        "germany",
+        "europe"
+      ]
+    },
+    {
+      "id": "north-carolina",
+      "geofabrik": "north-america/us/north-carolina",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "north-caucasus-fed-district",
+      "geofabrik": "russia/north-caucasus-fed-district",
+      "groups": [
+        "russia"
+      ]
+    },
+    {
+      "id": "north-dakota",
+      "geofabrik": "north-america/us/north-dakota",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "north-korea",
+      "geofabrik": "asia/north-korea",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "northwest-territories",
+      "geofabrik": "north-america/canada/northwest-territories",
+      "groups": [
+        "canada",
+        "north-america"
+      ]
+    },
+    {
+      "id": "northwestern-fed-district",
+      "geofabrik": "russia/northwestern-fed-district",
+      "groups": [
+        "russia"
+      ]
+    },
+    {
+      "id": "norway",
+      "geofabrik": "europe/norway",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "nova-scotia",
+      "geofabrik": "north-america/canada/nova-scotia",
+      "groups": [
+        "canada",
+        "north-america"
+      ]
+    },
+    {
+      "id": "nunavut",
+      "geofabrik": "north-america/canada/nunavut",
+      "groups": [
+        "canada",
+        "north-america"
+      ]
+    },
+    {
+      "id": "ohio",
+      "geofabrik": "north-america/us/ohio",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "oklahoma",
+      "geofabrik": "north-america/us/oklahoma",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "ontario",
+      "geofabrik": "north-america/canada/ontario",
+      "groups": [
+        "canada",
+        "north-america"
+      ]
+    },
+    {
+      "id": "oregon",
+      "geofabrik": "north-america/us/oregon",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "pakistan",
+      "geofabrik": "asia/pakistan",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "palau",
+      "geofabrik": "australia-oceania/palau",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "panama",
+      "geofabrik": "central-america/panama",
+      "groups": [
+        "central-america"
+      ]
+    },
+    {
+      "id": "papua-new-guinea",
+      "geofabrik": "australia-oceania/papua-new-guinea",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "paraguay",
+      "geofabrik": "south-america/paraguay",
+      "groups": [
+        "south-america"
+      ]
+    },
+    {
+      "id": "pays-de-la-loire",
+      "geofabrik": "europe/france/pays-de-la-loire",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "pennsylvania",
+      "geofabrik": "north-america/us/pennsylvania",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "peru",
+      "geofabrik": "south-america/peru",
+      "groups": [
+        "south-america"
+      ]
+    },
+    {
+      "id": "philippines",
+      "geofabrik": "asia/philippines",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "picardie",
+      "geofabrik": "europe/france/picardie",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "pitcairn-islands",
+      "geofabrik": "australia-oceania/pitcairn-islands",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "poitou-charentes",
+      "geofabrik": "europe/france/poitou-charentes",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "poland",
+      "geofabrik": "europe/poland",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "polynesie-francaise",
+      "geofabrik": "australia-oceania/polynesie-francaise",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "portugal",
+      "geofabrik": "europe/portugal",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "prince-edward-island",
+      "geofabrik": "north-america/canada/prince-edward-island",
+      "groups": [
+        "canada",
+        "north-america"
+      ]
+    },
+    {
+      "id": "provence-alpes-cote-d-azur",
+      "geofabrik": "europe/france/provence-alpes-cote-d-azur",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "puerto-rico",
+      "geofabrik": "north-america/us/puerto-rico",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "quebec",
+      "geofabrik": "north-america/canada/quebec",
+      "groups": [
+        "canada",
+        "north-america"
+      ]
+    },
+    {
+      "id": "reunion",
+      "geofabrik": "europe/france/reunion",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "rheinland-pfalz",
+      "geofabrik": "europe/germany/rheinland-pfalz",
+      "groups": [
+        "germany",
+        "europe"
+      ]
+    },
+    {
+      "id": "rhode-island",
+      "geofabrik": "north-america/us/rhode-island",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "rhone-alpes",
+      "geofabrik": "europe/france/rhone-alpes",
+      "groups": [
+        "france",
+        "europe"
+      ]
+    },
+    {
+      "id": "romania",
+      "geofabrik": "europe/romania",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "rwanda",
+      "geofabrik": "africa/rwanda",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "saarland",
+      "geofabrik": "europe/germany/saarland",
+      "groups": [
+        "germany",
+        "europe"
+      ]
+    },
+    {
+      "id": "sachsen",
+      "geofabrik": "europe/germany/sachsen",
+      "groups": [
+        "germany",
+        "europe"
+      ]
+    },
+    {
+      "id": "sachsen-anhalt",
+      "geofabrik": "europe/germany/sachsen-anhalt",
+      "groups": [
+        "germany",
+        "europe"
+      ]
+    },
+    {
+      "id": "saint-helena-ascension-and-tristan-da-cunha",
+      "geofabrik": "africa/saint-helena-ascension-and-tristan-da-cunha",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "samoa",
+      "geofabrik": "australia-oceania/samoa",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "sao-tome-and-principe",
+      "geofabrik": "africa/sao-tome-and-principe",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "saskatchewan",
+      "geofabrik": "north-america/canada/saskatchewan",
+      "groups": [
+        "canada",
+        "north-america"
+      ]
+    },
+    {
+      "id": "schleswig-holstein",
+      "geofabrik": "europe/germany/schleswig-holstein",
+      "groups": [
+        "germany",
+        "europe"
+      ]
+    },
+    {
+      "id": "senegal-and-gambia",
+      "geofabrik": "africa/senegal-and-gambia",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "serbia",
+      "geofabrik": "europe/serbia",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "seychelles",
+      "geofabrik": "africa/seychelles",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "siberian-fed-district",
+      "geofabrik": "russia/siberian-fed-district",
+      "groups": [
+        "russia"
+      ]
+    },
+    {
+      "id": "sierra-leone",
+      "geofabrik": "africa/sierra-leone",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "slovakia",
+      "geofabrik": "europe/slovakia",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "slovenia",
+      "geofabrik": "europe/slovenia",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "solomon-islands",
+      "geofabrik": "australia-oceania/solomon-islands",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "somalia",
+      "geofabrik": "africa/somalia",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "south-africa",
+      "geofabrik": "africa/south-africa",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "south-africa-and-lesotho",
+      "geofabrik": "africa/south-africa-and-lesotho",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "south-carolina",
+      "geofabrik": "north-america/us/south-carolina",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "south-dakota",
+      "geofabrik": "north-america/us/south-dakota",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "south-fed-district",
+      "geofabrik": "russia/south-fed-district",
+      "groups": [
+        "russia"
+      ]
+    },
+    {
+      "id": "south-korea",
+      "geofabrik": "asia/south-korea",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "south-sudan",
+      "geofabrik": "africa/south-sudan",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "spain",
+      "geofabrik": "europe/spain",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "sri-lanka",
+      "geofabrik": "asia/sri-lanka",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "sudan",
+      "geofabrik": "africa/sudan",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "suriname",
+      "geofabrik": "south-america/suriname",
+      "groups": [
+        "south-america"
+      ]
+    },
+    {
+      "id": "swaziland",
+      "geofabrik": "africa/swaziland",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "sweden",
+      "geofabrik": "europe/sweden",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "switzerland",
+      "geofabrik": "europe/switzerland",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "syria",
+      "geofabrik": "asia/syria",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "taiwan",
+      "geofabrik": "asia/taiwan",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "tajikistan",
+      "geofabrik": "asia/tajikistan",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "tanzania",
+      "geofabrik": "africa/tanzania",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "tennessee",
+      "geofabrik": "north-america/us/tennessee",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "texas",
+      "geofabrik": "north-america/us/texas",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "thailand",
+      "geofabrik": "asia/thailand",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "thueringen",
+      "geofabrik": "europe/germany/thueringen",
+      "groups": [
+        "germany",
+        "europe"
+      ]
+    },
+    {
+      "id": "togo",
+      "geofabrik": "africa/togo",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "tokelau",
+      "geofabrik": "australia-oceania/tokelau",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "tonga",
+      "geofabrik": "australia-oceania/tonga",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "tunisia",
+      "geofabrik": "africa/tunisia",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "turkey",
+      "geofabrik": "europe/turkey",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "turkmenistan",
+      "geofabrik": "asia/turkmenistan",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "tuvalu",
+      "geofabrik": "australia-oceania/tuvalu",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "uganda",
+      "geofabrik": "africa/uganda",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "ukraine",
+      "geofabrik": "europe/ukraine",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "united-kingdom",
+      "geofabrik": "europe/united-kingdom",
+      "groups": [
+        "europe"
+      ]
+    },
+    {
+      "id": "ural-fed-district",
+      "geofabrik": "russia/ural-fed-district",
+      "groups": [
+        "russia"
+      ]
+    },
+    {
+      "id": "uruguay",
+      "geofabrik": "south-america/uruguay",
+      "groups": [
+        "south-america"
+      ]
+    },
+    {
+      "id": "us-virgin-islands",
+      "geofabrik": "north-america/us/us-virgin-islands",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "utah",
+      "geofabrik": "north-america/us/utah",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "uzbekistan",
+      "geofabrik": "asia/uzbekistan",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "vanuatu",
+      "geofabrik": "australia-oceania/vanuatu",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "venezuela",
+      "geofabrik": "south-america/venezuela",
+      "groups": [
+        "south-america"
+      ]
+    },
+    {
+      "id": "vermont",
+      "geofabrik": "north-america/us/vermont",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "vietnam",
+      "geofabrik": "asia/vietnam",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "virginia",
+      "geofabrik": "north-america/us/virginia",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "volga-fed-district",
+      "geofabrik": "russia/volga-fed-district",
+      "groups": [
+        "russia"
+      ]
+    },
+    {
+      "id": "wallis-et-futuna",
+      "geofabrik": "australia-oceania/wallis-et-futuna",
+      "groups": [
+        "australia-oceania"
+      ]
+    },
+    {
+      "id": "washington",
+      "geofabrik": "north-america/us/washington",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "west-virginia",
+      "geofabrik": "north-america/us/west-virginia",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "wisconsin",
+      "geofabrik": "north-america/us/wisconsin",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "wyoming",
+      "geofabrik": "north-america/us/wyoming",
+      "groups": [
+        "us",
+        "north-america"
+      ]
+    },
+    {
+      "id": "yemen",
+      "geofabrik": "asia/yemen",
+      "groups": [
+        "asia"
+      ]
+    },
+    {
+      "id": "yukon",
+      "geofabrik": "north-america/canada/yukon",
+      "groups": [
+        "canada",
+        "north-america"
+      ]
+    },
+    {
+      "id": "zambia",
+      "geofabrik": "africa/zambia",
+      "groups": [
+        "africa"
+      ]
+    },
+    {
+      "id": "zimbabwe",
+      "geofabrik": "africa/zimbabwe",
+      "groups": [
+        "africa"
+      ]
+    }
+  ],
+  "statsDriftRatio": 0.1,
+  "workerCount": 0,
+  "publisher": "",
+  "maxGenerations": 6,
+  "maxDeletedRatio": 0.005,
+  "maxDeltaRatio": 0.3
+}
