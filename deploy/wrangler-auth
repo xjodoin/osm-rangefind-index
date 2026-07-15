@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Reuse Wrangler's OAuth profile for commands executed over non-interactive SSH.
+set -euo pipefail
+
+config="${XDG_CONFIG_HOME:-$HOME/.config}/.wrangler/config/default.toml"
+if [ ! -f "$config" ]; then
+  echo "Wrangler is not authenticated; run: wrangler login" >&2
+  exit 1
+fi
+
+# Refresh the OAuth profile when necessary, then expose its current access
+# token in the form required by non-interactive Wrangler commands.
+wrangler whoami >/dev/null
+token=$(sed -n 's/^oauth_token = "\(.*\)"/\1/p' "$config")
+if [ -z "$token" ]; then
+  echo "Wrangler OAuth token is missing; run: wrangler login" >&2
+  exit 1
+fi
+
+exec env CLOUDFLARE_API_TOKEN="$token" wrangler "$@"

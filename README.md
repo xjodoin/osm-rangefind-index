@@ -76,8 +76,8 @@ npm run update -- --prune             # occasional: delete unreferenced packs on
 ## Scheduling (cron)
 
 ```cron
-# Weeknights: start 22:15, hand the server back before 06:15.
-15 22 * * 0-4  /usr/bin/env INDEX_LOG_FILE=logs/nightly.log /srv/osm-rangefind-index/scripts/nightly.sh --deadline 06:15
+# Weeknights: start 20:00, hand the server back before 06:15.
+0 20 * * 0-4   /usr/bin/env INDEX_LOG_FILE=logs/nightly.log /srv/osm-rangefind-index/scripts/nightly.sh --deadline 06:15
 
 # Weekend: start Saturday 00:15, run up to 54h (until ~Mon 06:15).
 15 0 * * 6     /usr/bin/env INDEX_LOG_FILE=logs/weekend.log /srv/osm-rangefind-index/scripts/nightly.sh --max-hours 54

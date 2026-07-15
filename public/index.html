@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Status and usage guide for the public Rangefind OpenStreetMap index.">
+  <title>Rangefind OpenStreetMap Index</title>
+  <meta name="theme-color" content="#14161d">
+  <link rel="canonical" href="https://osm.rangefind.dev/">
+  <link rel="icon" href="https://rangefind.dev/assets/favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="https://rangefind.dev/assets/fonts/bricolage-grotesque-400-800-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="https://rangefind.dev/assets/fonts/martian-mono-400-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="https://rangefind.dev/assets/site.css">
+  <style>
+    .index-hero {
+      color: #f2f0e4;
+      background: var(--ink);
+      border-bottom: 1px solid var(--line-dark);
+    }
+
+    .index-hero__inner {
+      display: grid;
+      grid-template-columns: minmax(0, 7fr) minmax(260px, 5fr);
+      gap: clamp(2rem, 5vw, 4rem);
+      align-items: center;
+      max-width: var(--w);
+      margin: 0 auto;
+      padding: clamp(3rem, 8vw, 5.5rem) 20px clamp(2.6rem, 6vw, 4rem);
+    }
+
+    .index-hero .eyebrow { color: var(--marker); }
+    .index-hero h1 { max-width: 13ch; color: #fffdf3; }
+    .index-hero__lede { max-width: 48ch; color: #c9c7ba; font-size: 1.13rem; }
+    .index-hero__lede strong { color: #fffdf3; font-weight: 600; }
+
+    .index-hero__aside {
+      padding: 1.15rem;
+      border: 1px solid var(--line-dark);
+      border-radius: 14px;
+      background: var(--ink-2);
+    }
+
+    .index-hero__aside .eyebrow { margin-bottom: .65rem; }
+    .index-hero__aside p { margin: .9rem 0 1.2rem; color: #9aa1ad; font-size: .86rem; }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: .55rem;
+      min-width: 8.5rem;
+      padding: .55rem .8rem;
+      border: 1px solid var(--line-dark);
+      border-radius: 999px;
+      color: #f2f0e4;
+      font-family: var(--display);
+      font-size: .88rem;
+      font-weight: 650;
+      text-transform: capitalize;
+    }
+
+    .badge::before {
+      width: .58rem;
+      height: .58rem;
+      border-radius: 50%;
+      background: var(--marker);
+      box-shadow: 0 0 0 .22rem rgba(255, 201, 64, .14);
+      content: "";
+    }
+
+    .badge.ready::before { background: var(--pine-bright); box-shadow: 0 0 0 .22rem rgba(53, 194, 172, .14); }
+    .badge.failed::before { background: #ff7b72; box-shadow: 0 0 0 .22rem rgba(255, 123, 114, .14); }
+    .badge.running::before { animation: pulse 1.5s infinite; }
+
+    @keyframes pulse { 50% { opacity: .35; transform: scale(.75); } }
+
+    .status-section { padding-top: clamp(2.8rem, 7vw, 4.6rem); }
+    .status-section > p { max-width: var(--w-text); color: var(--fg-muted); }
+    .status-panel { margin-top: 1.5rem; padding: 1.2rem; border: 1px solid var(--rule); border-radius: 12px; background: var(--bg-raised); }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 1rem;
+    }
+
+    .metric {
+      min-height: 7.5rem;
+      padding: .7rem .2rem 0;
+      border-top: 2px solid var(--marker);
+    }
+
+    .metric-label {
+      display: block;
+      color: var(--fg-muted);
+      font-family: var(--mono);
+      font-size: .64rem;
+      letter-spacing: .03em;
+    }
+
+    .metric-value {
+      display: block;
+      margin-top: .45rem;
+      font-family: var(--display);
+      font-size: clamp(1.55rem, 4vw, 2.2rem);
+      font-weight: 750;
+      line-height: 1.15;
+    }
+
+    .metric-detail { color: var(--fg-muted); font-size: .8rem; }
+    .status-progress { margin-top: 1rem; }
+
+    .progress-bar {
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 0;
+      border-radius: 3px;
+      background: var(--marker);
+      transition: width .5s ease;
+    }
+
+    .status-meta {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: .7rem 1.5rem;
+      margin-top: .75rem;
+      color: var(--fg-muted);
+      font-size: .85rem;
+    }
+
+    .error {
+      display: none;
+      margin-top: 1rem;
+      padding: .8rem 1rem;
+      border: 1px solid rgba(255, 123, 114, .35);
+      border-radius: 8px;
+      background: color-mix(in srgb, #ff7b72 8%, var(--bg-raised));
+      color: var(--fg);
+    }
+
+    .content-grid {
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 1.2rem;
+      margin-top: 1.6rem;
+    }
+
+    .content-card { padding: 1.2rem; border: 1px solid var(--rule); border-radius: 12px; background: var(--bg-raised); }
+    .content-card p { color: var(--fg-muted); font-size: .92rem; }
+    .content-card pre { margin-bottom: 0; }
+
+    .links {
+      display: grid;
+      gap: .65rem;
+      margin-top: 1rem;
+    }
+
+    .links a {
+      display: flex;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: .8rem .9rem;
+      border-top: 1px solid var(--rule);
+      color: var(--fg);
+      text-decoration: none;
+    }
+
+    .links a:first-child { border-top: 0; }
+    .links a:hover { color: var(--link); }
+    .links code { color: var(--fg-muted); }
+    .site-footer__inner > p { max-width: 44rem; }
+
+    @media (max-width: 900px) {
+      .index-hero__inner { grid-template-columns: 1fr; }
+      .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .content-grid { grid-template-columns: 1fr; }
+    }
+
+    @media (max-width: 470px) {
+      .metrics { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="site-header__inner">
+      <a class="brand" href="https://rangefind.dev/" aria-label="Rangefind home">
+        <svg class="brand__mark" width="26" height="26" viewBox="0 0 26 26" aria-hidden="true"><rect x="1" y="11" width="24" height="4" rx="2" fill="currentColor" opacity=".25"/><rect x="6" y="11" width="9" height="4" rx="2" fill="var(--marker)"/></svg>
+        <span class="brand__name">rangefind</span>
+      </a>
+      <nav class="site-nav" aria-label="Site">
+        <a href="https://rangefind.dev/">Home</a>
+        <a href="https://rangefind.dev/docs/">Docs</a>
+        <a href="https://rangefind.dev/docs/benchmarks/">Benchmarks</a>
+        <a href="https://rangefind.dev/map/">Map demo</a>
+        <a href="https://github.com/xjodoin/rangefind" rel="external">GitHub</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="index-hero">
+    <div class="index-hero__inner">
+      <div>
+        <span class="eyebrow">GET shards/monaco/manifest.min.json → range requests</span>
+        <h1>OpenStreetMap, ready for range search.</h1>
+        <p class="index-hero__lede">A browser-native, geographically sharded <strong>Rangefind index</strong> built from Geofabrik extracts and served as plain files from Cloudflare R2.</p>
+        <div class="hero__actions">
+          <a class="button button--marker" href="https://rangefind.dev/docs/geo-search/">Geo search docs</a>
+          <a class="button button--ghost" href="https://rangefind.dev/">Visit Rangefind</a>
+        </div>
+      </div>
+      <div class="index-hero__aside" aria-live="polite">
+        <span class="eyebrow">status.json</span>
+        <div id="phase-badge" class="badge">Loading</div>
+        <p>This public index is updated by the Ubuntu indexing process. The status below refreshes every 30 seconds.</p>
+        <div class="range-track range-track--static" aria-hidden="true">
+          <span class="range-track__span" style="left:2%;width:5%"></span>
+          <span class="range-track__span" style="left:31%;width:11%"></span>
+          <span class="range-track__span" style="left:68%;width:17%"></span>
+        </div>
+        <div class="range-legend" aria-hidden="true"><span>manifest</span><span>shards</span><span>packed index</span></div>
+      </div>
+    </div>
+  </div>
+
+  <main id="main">
+    <section class="section status-section">
+      <span class="eyebrow">status.json → live publication state</span>
+      <h2>Index status</h2>
+      <p>The root manifest only advances after every selected shard is safely uploaded, so clients always see a consistent searchable snapshot.</p>
+      <div class="status-panel" aria-live="polite">
+        <div class="metrics">
+          <div class="metric">
+            <span class="metric-label">Corpora acquired</span>
+            <strong id="acquired" class="metric-value">—</strong>
+            <span id="acquired-detail" class="metric-detail">regions downloaded</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">Shards published</span>
+            <strong id="published" class="metric-value">—</strong>
+            <span id="published-detail" class="metric-detail">available to search</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">Documents live</span>
+            <strong id="documents" class="metric-value">—</strong>
+            <span class="metric-detail">searchable OSM places</span>
+          </div>
+          <div class="metric">
+            <span class="metric-label">Latest data</span>
+            <strong id="data-date" class="metric-value">—</strong>
+            <span id="data-detail" class="metric-detail">Geofabrik source date</span>
+          </div>
+        </div>
+        <div class="range-track status-progress" aria-hidden="true"><div id="progress" class="progress-bar"></div></div>
+        <div class="status-meta">
+          <span id="run-status">Checking indexing status…</span>
+          <span>Updated <time id="status-updated">—</time></span>
+        </div>
+        <div id="error" class="error"></div>
+      </div>
+    </section>
+
+    <section class="section section--last">
+      <span class="eyebrow">createSearch() → HTTP range requests</span>
+      <h2>Use the public index</h2>
+      <p>Point Rangefind at this origin. The runtime fetches only the manifests and immutable packs needed to answer each query.</p>
+      <div class="content-grid">
+        <div class="content-card">
+        <h2>Search from JavaScript</h2>
+        <p>Install <code>rangefind</code>, create the search engine, and query OpenStreetMap places directly from the browser or Node.</p>
+        <pre><code>npm install rangefind
+
+import { createSearch } from "rangefind";
+
+const search = await createSearch({
+  baseUrl: "https://osm.rangefind.dev/",
+});
+
+const result = await search.search({
+  q: "1234 rue sainte-catherine",
+  size: 5,
+});</code></pre>
+        </div>
+
+        <div class="content-card">
+        <h2>Index endpoints</h2>
+        <p>Manifests stay fresh while content-addressed index packs are cached at Cloudflare's edge.</p>
+        <div class="links">
+          <a href="manifest.min.json"><span>Compact manifest</span><code>manifest.min.json</code></a>
+          <a href="manifest.json"><span>Full manifest</span><code>manifest.json</code></a>
+          <a href="status.json"><span>Indexer status</span><code>status.json</code></a>
+        </div>
+        <pre><code>const nearby = await search.search({
+  q: "",
+  geo: {
+    near: { lat: 45.5, lon: -73.6 },
+    sort: "distance",
+  },
+});</code></pre>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="site-footer__inner">
+      <div class="range-track range-track--static" aria-hidden="true">
+        <span class="range-track__span" style="left:12%;width:14%"></span>
+        <span class="range-track__span" style="left:44%;width:8%"></span>
+        <span class="range-track__span" style="left:71%;width:19%"></span>
+      </div>
+      <p>This OpenStreetMap index demonstrates Rangefind's sharded geo search against static files and HTTP range requests—without a search server.</p>
+      <nav aria-label="Footer">
+        <a href="https://rangefind.dev/">Rangefind home</a>
+        <a href="https://rangefind.dev/docs/">Documentation</a>
+        <a href="https://rangefind.dev/map/">Map demo</a>
+        <a href="https://github.com/xjodoin/rangefind" rel="external">GitHub</a>
+        <a href="https://www.npmjs.com/package/rangefind" rel="external">npm</a>
+      </nav>
+      <p class="site-footer__legal">Data © OpenStreetMap contributors · ODbL · Updated on weeknights and weekends</p>
+    </div>
+  </footer>
+
+  <script>
+    const number = new Intl.NumberFormat();
+    const shortDate = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" });
+    const dateTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
+
+    function setText(id, value) {
+      document.getElementById(id).textContent = value;
+    }
+
+    function formatDate(value, includeTime = false) {
+      if (!value) return "Not yet";
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? value : (includeTime ? dateTime : shortDate).format(date);
+    }
+
+    function render(status) {
+      const { index, run } = status;
+      const badge = document.getElementById("phase-badge");
+      const visualPhase = run.state === "running" ? "running" : index.phase;
+      badge.className = `badge ${visualPhase}`;
+      badge.textContent = run.state === "running" ? `Running · ${index.phase}` : index.phase;
+
+      setText("acquired", `${number.format(index.acquiredRegions)} / ${number.format(index.totalRegions)}`);
+      setText("acquired-detail", `${index.acquisitionPercent}% of regional corpora`);
+      setText("published", `${number.format(index.publishedShards)} / ${number.format(index.totalRegions)}`);
+      setText("published-detail", `${index.publicationPercent}% of target shards`);
+      setText("documents", number.format(index.publishedDocuments));
+      setText("data-date", formatDate(index.latestDataAt));
+      setText("data-detail", index.latestDataAt ? "newest source represented" : "awaiting first corpus");
+      setText("status-updated", formatDate(status.generatedAt, true));
+
+      const progress = index.phase === "acquiring" ? index.acquisitionPercent : index.publicationPercent;
+      document.getElementById("progress").style.width = `${Math.max(0, Math.min(100, progress))}%`;
+
+      const active = run.progress;
+      const activeLine = active
+        ? ` · ${active.stage} ${number.format(active.completed)} / ${number.format(active.total)}${active.region ? ` · ${active.region}` : ""}`
+        : "";
+      const runLine = run.state === "running"
+        ? `Indexer started ${formatDate(run.startedAt, true)}${activeLine}${run.deadline ? ` · deadline ${formatDate(run.deadline, true)}` : ""}`
+        : `Last successful run ${formatDate(run.lastSuccessfulAt, true)}`;
+      setText("run-status", runLine);
+
+      const error = document.getElementById("error");
+      if (run.state === "failed" && run.error) {
+        error.textContent = `Last run failed: ${run.error}`;
+        error.style.display = "block";
+      } else {
+        error.style.display = "none";
+      }
+    }
+
+    async function refresh() {
+      try {
+        const response = await fetch(`status.json?t=${Date.now()}`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        render(await response.json());
+      } catch (error) {
+        const badge = document.getElementById("phase-badge");
+        badge.className = "badge failed";
+        badge.textContent = "Status unavailable";
+        setText("run-status", `Could not load indexer status: ${error.message}`);
+      }
+    }
+
+    refresh();
+    setInterval(refresh, 30_000);
+  </script>
+</body>
+</html>

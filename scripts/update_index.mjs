@@ -493,6 +493,101 @@ function uploadRoot(remote) {
   }
 }
 
+function statusSnapshot(regions, state) {
+  const rows = regions.map(region => {
+    const entry = state.regions[region.id] || {};
+    const acquired = hasCorpus(region);
+    const built = Boolean(entry.builtFingerprint)
+      && existsSync(join(shardDir(region), "manifest.min.json"));
+    const uploaded = built
+      && entry.uploadedFingerprint === entry.builtFingerprint;
+    return { region, entry, acquired, built, uploaded };
+  });
+  const totalRegions = rows.length;
+  const acquiredRegions = rows.filter(row => row.acquired).length;
+  const builtShards = rows.filter(row => row.built).length;
+  const uploadedShards = rows.filter(row => row.uploaded).length;
+  const fallbackPublished = rows.filter(row => row.uploaded);
+  const publishedRegionIds = state.publishedRoot?.regionIds
+    || fallbackPublished.map(row => row.region.id);
+  const publishedIdSet = new Set(publishedRegionIds);
+  const publishedShards = state.publishedRoot?.shards ?? publishedRegionIds.length;
+  const publishedDocuments = Number(state.publishedRoot?.documents ?? fallbackPublished
+    .filter(row => row.uploaded)
+    .reduce((sum, row) => sum + (row.entry.docs || 0), 0));
+  const latestDataAt = rows
+    .filter(row => publishedIdSet.has(row.region.id))
+    .map(row => row.entry.pbfLastModified)
+    .filter(Boolean)
+    .map(value => new Date(value))
+    .filter(value => !Number.isNaN(value.getTime()))
+    .sort((a, b) => b - a)[0]?.toISOString() || null;
+  const phase = state.run?.status === "failed" ? "failed"
+    : acquiredRegions < totalRegions ? "acquiring"
+    : builtShards < totalRegions ? "building"
+    : publishedShards < totalRegions ? "publishing"
+    : "ready";
+  const percent = value => totalRegions
+    ? Math.round((value / totalRegions) * 1000) / 10
+    : 0;
+
+  return {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    run: {
+      state: state.run?.status || "idle",
+      startedAt: state.run?.startedAt || null,
+      completedAt: state.run?.completedAt || null,
+      deadline: state.run?.deadline || null,
+      selectedRegions: state.run?.selectedRegions || null,
+      progress: state.run?.progress || null,
+      lastSuccessfulAt: state.lastSuccessfulRunAt || null,
+      error: state.run?.error || null
+    },
+    index: {
+      phase,
+      totalRegions,
+      acquiredRegions,
+      builtShards,
+      uploadedShards,
+      publishedShards,
+      publishedDocuments,
+      acquisitionPercent: percent(acquiredRegions),
+      publicationPercent: percent(publishedShards),
+      latestDataAt,
+      lastPublishedAt: state.rootPublishedAt || null,
+      nextPendingRegions: rows
+        .filter(row => !row.acquired)
+        .slice(0, 10)
+        .map(row => row.region.id)
+    },
+    endpoints: {
+      manifest: "manifest.min.json",
+      status: "status.json"
+    }
+  };
+}
+
+function writeStatusArtifacts(regions, state) {
+  mkdirSync(OUT, { recursive: true });
+  writeFileSync(join(OUT, "index.html"), readFileSync(join(projectRoot, "public/index.html")));
+  writeFileSync(join(OUT, "status.json"), `${JSON.stringify(statusSnapshot(regions, state), null, 2)}\n`);
+}
+
+function publishStatusArtifacts(regions, state, remote, upload, includePage = false) {
+  try {
+    writeStatusArtifacts(regions, state);
+    if (upload) {
+      const names = includePage ? ["index.html", "status.json"] : ["status.json"];
+      for (const name of names) {
+        rclone(["copyto", join(OUT, name), `${remote}/${name}`]);
+      }
+    }
+  } catch (error) {
+    log(`Status page update failed — ${error.message}`);
+  }
+}
+
 // The state records what was uploaded, but the remote is the truth: a wiped
 // bucket or a changed R2_REMOTE must not be trusted-through. One cheap
 // listing call per shard per run.
@@ -597,6 +692,9 @@ async function main() {
   const args = parseArgs(process.argv.slice(2));
   const loaded = loadRegions(args);
   const { regions } = loaded;
+  const allRegions = args.regions
+    ? loadRegions({ ...args, regions: null }).regions
+    : regions;
   const options = loaded;
   mkdirSync(WORK, { recursive: true });
   const state = loadJson(STATE_PATH, { regions: {} });
@@ -614,10 +712,36 @@ async function main() {
   const remaining = () => stopAt - Date.now();
   const outOfTime = (needMs = 5 * 60_000) => remaining() < needMs;
   log(`Run starts; deadline ${stopAt === Infinity ? "none" : new Date(stopAt).toISOString()}`);
+  state.run = {
+    status: "running",
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    deadline: stopAt === Infinity ? null : new Date(stopAt).toISOString(),
+    selectedRegions: args.regions,
+    progress: null,
+    error: null
+  };
+  saveState(state);
+  publishStatusArtifacts(allRegions, state, remote, args.upload, true);
+  const updateProgress = (stage, region = null, completed = 0, total = regions.length) => {
+    state.run.progress = {
+      stage,
+      region: region?.id || null,
+      completed,
+      total,
+      updatedAt: new Date().toISOString()
+    };
+    saveState(state);
+    publishStatusArtifacts(allRegions, state, remote, args.upload);
+  };
+  let runError = null;
+
+  try {
 
   // 1 + 2: refresh and extract every selected region (cheap when unchanged).
-  for (const region of regions) {
+  for (const [regionIndex, region] of regions.entries()) {
     if (outOfTime()) break;
+    updateProgress("acquiring", region, regionIndex, regions.length);
     try {
       await refreshPbf(region, state);
       if (await extractJsonl(region, state)) {
@@ -650,6 +774,7 @@ async function main() {
   // Region-scoped runs normally preserve the planet-wide artifact. An
   // explicit --partial run is the deliberate exception used for bring-up
   // and smoke tests; the next full run will regenerate stats for all regions.
+  updateProgress("preparing", null, ready.length, regions.length);
   await ensureScoringStats(ready, options, state, args.forceStats, !args.regions || args.partial);
 
   // 4: rebuild stale shards until the deadline.
@@ -661,11 +786,12 @@ async function main() {
     }
   });
   log(`${stale.length}/${ready.length} shard(s) need building: ${stale.map(r => r.id).join(", ") || "none"}`);
-  for (const region of stale) {
+  for (const [regionIndex, region] of stale.entries()) {
     if (outOfTime(10 * 60_000)) {
       log("Deadline near — stopping before next shard build.");
       break;
     }
+    updateProgress("building", region, regionIndex, stale.length);
     const entry = state.regions[region.id];
     const plan = await planShardBuild(region, options, state);
     if (plan.noop) {
@@ -738,11 +864,12 @@ async function main() {
   log(`Root manifest: ${rootManifest.shards.length} shard(s), ${rootManifest.total.toLocaleString()} docs.`);
 
   if (args.upload) {
-    for (const region of built) {
+    for (const [regionIndex, region] of built.entries()) {
       if (outOfTime(2 * 60_000)) {
         log("Deadline near — remaining uploads next run.");
         break;
       }
+      updateProgress("publishing", region, regionIndex, built.length);
       const entry = state.regions[region.id];
       if (entry.uploadedFingerprint === entry.builtFingerprint) {
         if (remoteHasShard(remote, region)) {
@@ -777,13 +904,37 @@ async function main() {
       return Boolean(entry.builtFingerprint) && entry.uploadedFingerprint === entry.builtFingerprint;
     });
     if (allUploaded) {
+      updateProgress("publishing", null, built.length, built.length);
       uploadRoot(remote);
+      state.rootPublishedAt = new Date().toISOString();
+      state.publishedRoot = {
+        shards: rootManifest.shards.length,
+        documents: rootManifest.total,
+        regionIds: rootManifest.shards.map(shard => shard.id)
+      };
+      saveState(state);
       log("Publish complete.");
     } else {
       log("Some shards not uploaded yet; root manifest NOT updated remotely (stays consistent).");
     }
   }
   log("Run finished.");
+  } catch (error) {
+    runError = error;
+    throw error;
+  } finally {
+    const completedAt = new Date().toISOString();
+    state.run = {
+      ...state.run,
+      status: runError ? "failed" : "idle",
+      completedAt,
+      progress: null,
+      error: runError ? String(runError.message || runError).slice(0, 500) : null
+    };
+    if (!runError) state.lastSuccessfulRunAt = completedAt;
+    saveState(state);
+    publishStatusArtifacts(allRegions, state, remote, args.upload);
+  }
 }
 
 main().catch(error => {
