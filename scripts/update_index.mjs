@@ -695,6 +695,18 @@ async function cleanupRegion(region, state) {
   log(`${region.id}: cleaned local artifacts (kept compressed corpus, manifests, id-maps)`);
 }
 
+async function uploadAndCleanupShard(region, state, remote, args) {
+  const entry = state.regions[region.id];
+  uploadShard(region, remote, args.prune && entry.localComplete === true);
+  entry.uploadedFingerprint = entry.builtFingerprint;
+  saveState(state);
+  log(`${region.id}: shard uploaded to R2.`);
+  if (!args.keepArtifacts) {
+    await cleanupRegion(region, state);
+    saveState(state);
+  }
+}
+
 // --- status ------------------------------------------------------------------
 
 function printStatus(regions, state) {
@@ -855,6 +867,12 @@ async function main() {
       entry.cleaned = false;
       saveState(state);
       log(`${region.id}: shard ${plan.update ? "delta applied" : "built"} (${shardGenerationCount(region)} generation(s)).`);
+      if (args.upload && !outOfTime(2 * 60_000)) {
+        updateProgress("publishing", region, regionIndex + 1, stale.length);
+        await uploadAndCleanupShard(region, state, remote, args);
+      } else if (args.upload) {
+        log(`${region.id}: shard ready; upload deferred because the deadline is near.`);
+      }
     } else {
       log(`${region.id}: build incomplete (will resume next run).`);
       break;
@@ -920,13 +938,7 @@ async function main() {
       }
       // Prune requires a complete local mirror (fresh full rebuild): a
       // sync-with-delete from a partial local copy would delete live packs.
-      uploadShard(region, remote, args.prune && entry.localComplete === true);
-      entry.uploadedFingerprint = entry.builtFingerprint;
-      saveState(state);
-      if (!args.keepArtifacts) {
-        await cleanupRegion(region, state);
-        saveState(state);
-      }
+      await uploadAndCleanupShard(region, state, remote, args);
     }
     const allUploaded = built.every(region => {
       const entry = state.regions[region.id];
