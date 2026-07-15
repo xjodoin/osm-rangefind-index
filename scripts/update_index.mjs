@@ -205,6 +205,33 @@ async function compressJsonl(region) {
   rmSync(plain, { force: true });
 }
 
+// extractOsmPlaces keeps resumable stage outputs beside the final corpus.
+// Once osm-places exists those stage outputs are no longer needed: future
+// builds consume the corpus, while a changed PBF can regenerate them. Keep
+// delta/build inputs and metadata outside these known extractor prefixes.
+function cleanupExtractionScratch(region) {
+  const dataDir = join(regionWorkRoot(region), "data");
+  if (!existsSync(dataDir)) return;
+  const prefixes = [
+    "osm-node-docs.",
+    "osm-way-candidates.",
+    "osm-way-anchor-coords.",
+    "osm-way-anchors."
+  ];
+  let files = 0;
+  let bytes = 0;
+  for (const name of readdirSync(dataDir)) {
+    if (!prefixes.some(prefix => name.startsWith(prefix))) continue;
+    const path = join(dataDir, name);
+    try { bytes += statSync(path).size; } catch { /* already gone */ }
+    rmSync(path, { recursive: true, force: true });
+    files++;
+  }
+  if (files) {
+    log(`${region.id}: cleaned ${files} extractor scratch file(s) (${(bytes / 1024 / 1024).toFixed(1)} MiB)`);
+  }
+}
+
 // Identity of a region's current upstream corpus — stable across
 // gzip/gunzip cycles and PBF deletion, so cleanup never causes rebuilds.
 function pbfIdentity(region, state) {
@@ -744,7 +771,8 @@ async function main() {
     updateProgress("acquiring", region, regionIndex, regions.length);
     try {
       await refreshPbf(region, state);
-      if (await extractJsonl(region, state)) {
+      const extracted = await extractJsonl(region, state);
+      if (extracted) {
         log(`${region.id}: corpus refreshed (${(state.regions[region.id].docs || 0).toLocaleString()} docs)`);
         if (!state.regions[region.id].builtFingerprint) {
           // Bring-up acquisition: no shard exists yet, so the corpus is not
@@ -755,6 +783,7 @@ async function main() {
           if (!region.pinned) rmSync(region.pbf, { force: true });
         }
       }
+      cleanupExtractionScratch(region);
       saveState(state);
     } catch (error) {
       log(`${region.id}: refresh/extract failed — ${error.message} (continuing)`);
