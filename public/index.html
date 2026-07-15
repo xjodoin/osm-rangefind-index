@@ -357,8 +357,9 @@ const result = await search.search({
       document.getElementById("progress").style.width = `${Math.max(0, Math.min(100, progress))}%`;
 
       const active = run.progress;
+      const activeRegion = active?.regions?.length ? active.regions.join(", ") : active?.region;
       const activeLine = active
-        ? ` · ${active.stage} ${number.format(active.completed)} / ${number.format(active.total)}${active.region ? ` · ${active.region}` : ""}`
+        ? ` · ${active.stage} ${number.format(active.completed)} / ${number.format(active.total)}${activeRegion ? ` · ${activeRegion}` : ""}`
         : "";
       const runLine = run.state === "running"
         ? `Indexer started ${formatDate(run.startedAt, true)}${activeLine}${run.deadline ? ` · deadline ${formatDate(run.deadline, true)}` : ""}`

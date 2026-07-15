@@ -52,6 +52,13 @@ every shard already built (`--partial` overrides the gate deliberately).
 Once acquisition completes, one stats pass runs, then shards build and
 publish region by region — every step deadline-aware and resumable.
 
+Acquisition uses `acquisitionConcurrency` lanes (default `2` in the shipped
+configuration), so downloads and normal-sized extracts can overlap. A PBF at
+or above `largePbfBytes` (default 1 GiB) consumes every lane and extracts
+alone to protect memory on the 31 GiB production host. Stats and shard builds
+remain sequential; each shard build already uses the configured CPU worker
+pool.
+
 Rough planet budget on a modern 12–16-core box: ~78 GiB of downloads
 (bandwidth-bound), a few hours of extraction, several hours for the stats
 pass, and on the order of 10–15 h of shard builds — i.e. **a weekend run
@@ -130,10 +137,10 @@ the PBF and extractor caches are deleted, the corpus JSONL is compressed
 (it is the next diff base and the stats-regeneration input), and the local
 index copy is gutted to manifests + generation id-maps (what future deltas
 need). Steady state per region ≈ the gzipped corpus — e.g. Luxembourg
-~17 MB on disk vs a 186 MB published index. Transient peak during one
-region's update ≈ PBF + plain JSONL + extractor caches + the shard being
-built; regions update one at a time, so size the disk for the largest
-region, not the sum.
+~17 MB on disk vs a 186 MB published index. Transient acquisition is bounded
+by `acquisitionConcurrency` normal regions or one large region. Shards still
+build one at a time, so build-time disk should be sized for the largest
+region rather than the full corpus.
 
 ## Serving
 

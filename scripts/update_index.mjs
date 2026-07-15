@@ -138,11 +138,38 @@ function loadRegions(args) {
     regions,
     statsDriftRatio: Number(config.statsDriftRatio || 0.1),
     workerCount: Number(config.workerCount || 0),
+    acquisitionConcurrency: Math.max(1, Math.min(4, Number(config.acquisitionConcurrency || 1))),
+    largePbfBytes: Math.max(1, Number(config.largePbfBytes || 1024 ** 3)),
     publisher: String(config.publisher || ""),
     // Delta policy: past any of these, the region gets a full rebuild.
     maxGenerations: Math.max(1, Number(config.maxGenerations || 6)),
     maxDeletedRatio: Number(config.maxDeletedRatio ?? 0.005),
     maxDeltaRatio: Number(config.maxDeltaRatio ?? 0.3)
+  };
+}
+
+function createWeightedLimiter(capacity) {
+  let used = 0;
+  const queue = [];
+  const drain = () => {
+    while (queue.length && used + queue[0].weight <= capacity) {
+      const next = queue.shift();
+      used += next.weight;
+      next.resolve();
+    }
+  };
+  return async (requestedWeight, fn) => {
+    const weight = Math.max(1, Math.min(capacity, requestedWeight));
+    await new Promise(resolveSlot => {
+      queue.push({ weight, resolve: resolveSlot });
+      drain();
+    });
+    try {
+      return await fn();
+    } finally {
+      used -= weight;
+      drain();
+    }
   };
 }
 
@@ -245,19 +272,20 @@ function pbfIdentity(region, state) {
 async function refreshPbf(region, state) {
   if (region.pinned) {
     if (!existsSync(region.pbf)) throw new Error(`${region.id}: pinned PBF missing at ${region.pbf}`);
-    return;
+    return { bytes: statSync(region.pbf).size };
   }
   const url = `https://download.geofabrik.de/${region.geofabrik}-latest.osm.pbf`;
   const head = await fetch(url, { method: "HEAD" });
   if (!head.ok) throw new Error(`${region.id}: HEAD ${url} → ${head.status}`);
   const lastModified = head.headers.get("last-modified") || "";
+  const bytes = Math.max(0, Number(head.headers.get("content-length") || 0));
   const entry = state.regions[region.id] || {};
   // The PBF gets deleted after a successful publish; re-download only when
   // upstream changed, or when extraction still needs it (stale/lost
   // extraction state) and the file is gone.
   const current = lastModified && lastModified === entry.pbfLastModified;
   const extractionCurrent = entry.extractIdentity === lastModified && hasCorpus(region);
-  if (current && (existsSync(region.pbf) || extractionCurrent)) return;
+  if (current && (existsSync(region.pbf) || extractionCurrent)) return { bytes: bytes || entry.pbfBytes || 0 };
 
   log(`${region.id}: downloading ${url} (${lastModified || "unknown date"})`);
   mkdirSync(dirname(region.pbf), { recursive: true });
@@ -278,7 +306,8 @@ async function refreshPbf(region, state) {
     pump();
   });
   renameSync(tmp, region.pbf);
-  state.regions[region.id] = { ...state.regions[region.id], pbfLastModified: lastModified };
+  state.regions[region.id] = { ...state.regions[region.id], pbfLastModified: lastModified, pbfBytes: bytes };
+  return { bytes };
 }
 
 // --- step 2: extract JSONL ---------------------------------------------------
@@ -762,12 +791,13 @@ async function main() {
   };
   saveState(state);
   publishStatusArtifacts(allRegions, state, remote, args.upload, true);
-  const updateProgress = (stage, region = null, completed = 0, total = regions.length) => {
+  const updateProgress = (stage, region = null, completed = 0, total = regions.length, extra = {}) => {
     state.run.progress = {
       stage,
       region: region?.id || null,
       completed,
       total,
+      ...extra,
       updatedAt: new Date().toISOString()
     };
     saveState(state);
@@ -777,30 +807,62 @@ async function main() {
 
   try {
 
-  // 1 + 2: refresh and extract every selected region (cheap when unchanged).
-  for (const [regionIndex, region] of regions.entries()) {
-    if (outOfTime()) break;
-    updateProgress("acquiring", region, regionIndex, regions.length);
-    try {
-      await refreshPbf(region, state);
-      const extracted = await extractJsonl(region, state);
-      if (extracted) {
-        log(`${region.id}: corpus refreshed (${(state.regions[region.id].docs || 0).toLocaleString()} docs)`);
-        if (!state.regions[region.id].builtFingerprint) {
-          // Bring-up acquisition: no shard exists yet, so the corpus is not
-          // a diff base — compress it now and drop the PBF, keeping the
-          // acquisition footprint near the gzipped corpus total instead of
-          // hundreds of GB of PBFs + plain JSONL.
-          await compressJsonl(region);
-          if (!region.pinned) rmSync(region.pbf, { force: true });
+  // 1 + 2: refresh and extract selected regions. Downloads may overlap with
+  // extraction; normal extracts share the configured lanes, while a large
+  // PBF takes every lane so two memory-heavy regions can never overlap.
+  const acquisitionConcurrency = Math.min(options.acquisitionConcurrency, regions.length);
+  const withExtractionCapacity = createWeightedLimiter(acquisitionConcurrency);
+  const activeRegions = new Set();
+  let acquisitionCursor = 0;
+  let acquisitionCompleted = 0;
+  const reportAcquisition = region => updateProgress(
+    "acquiring",
+    region,
+    acquisitionCompleted,
+    regions.length,
+    { regions: [...activeRegions] }
+  );
+  const acquireRegions = async () => {
+    while (!outOfTime()) {
+      const regionIndex = acquisitionCursor++;
+      if (regionIndex >= regions.length) return;
+      const region = regions[regionIndex];
+      activeRegions.add(region.id);
+      reportAcquisition(region);
+      try {
+        const source = await refreshPbf(region, state);
+        const large = source.bytes >= options.largePbfBytes;
+        if (large) {
+          log(`${region.id}: large PBF (${(source.bytes / 1024 / 1024 / 1024).toFixed(1)} GiB) — extracting exclusively`);
         }
+        const extracted = await withExtractionCapacity(
+          large ? acquisitionConcurrency : 1,
+          () => extractJsonl(region, state)
+        );
+        if (extracted) {
+          log(`${region.id}: corpus refreshed (${(state.regions[region.id].docs || 0).toLocaleString()} docs)`);
+          if (!state.regions[region.id].builtFingerprint) {
+            // Bring-up acquisition: no shard exists yet, so the corpus is not
+            // a diff base — compress it now and drop the PBF, keeping the
+            // acquisition footprint near the gzipped corpus total instead of
+            // hundreds of GB of PBFs + plain JSONL.
+            await compressJsonl(region);
+            if (!region.pinned) rmSync(region.pbf, { force: true });
+          }
+        }
+        cleanupExtractionScratch(region);
+        saveState(state);
+      } catch (error) {
+        log(`${region.id}: refresh/extract failed — ${error.message} (continuing)`);
+      } finally {
+        activeRegions.delete(region.id);
+        acquisitionCompleted++;
       }
-      cleanupExtractionScratch(region);
-      saveState(state);
-    } catch (error) {
-      log(`${region.id}: refresh/extract failed — ${error.message} (continuing)`);
     }
-  }
+  };
+  log(`Acquisition concurrency: ${acquisitionConcurrency} lane(s); PBFs >= ${(options.largePbfBytes / 1024 / 1024 / 1024).toFixed(1)} GiB run exclusively.`);
+  await Promise.all(Array.from({ length: acquisitionConcurrency }, () => acquireRegions()));
+  reportAcquisition(null);
 
   // 3: frozen stats (regenerating cascades a full rebuild via fingerprints).
   const ready = regions.filter(region => hasCorpus(region));

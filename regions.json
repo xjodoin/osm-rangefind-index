@@ -2280,6 +2280,8 @@
   ],
   "statsDriftRatio": 0.1,
   "workerCount": 0,
+  "acquisitionConcurrency": 2,
+  "largePbfBytes": 1073741824,
   "publisher": "",
   "maxGenerations": 6,
   "maxDeletedRatio": 0.005,
