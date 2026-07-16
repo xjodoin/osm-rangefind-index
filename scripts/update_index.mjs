@@ -634,6 +634,34 @@ function backfillRegionTermSet(region, state, remote) {
   }
 }
 
+function ensureRegionTermSet(region, state, remote) {
+  const entry = state.regions[region.id];
+  const fresh = entry.termSetFingerprint === entry.builtFingerprint && existsSync(termSetPath(region));
+  if (fresh) return true;
+  const localManifest = join(OUT, "shards", region.id, "manifest.min.json");
+  if (!entry.cleaned && existsSync(localManifest) && writeRegionTermSet(region, state)) return true;
+  return remote ? backfillRegionTermSet(region, state, remote) : false;
+}
+
+// Backfill existing published shards before new shard builds consume the
+// nightly window. Sidecars checkpoint independently, so an interrupted pass
+// resumes at the first missing shard on the next run.
+function prepareTextRoutingTermSets(built, state, remote, args, outOfTime, reserveMs) {
+  if (!args.textRouting) return true;
+  if (typeof rangefindShards.writeShardTermSet !== "function") return false;
+  for (const region of built) {
+    const entry = state.regions[region.id];
+    const fresh = entry.termSetFingerprint === entry.builtFingerprint && existsSync(termSetPath(region));
+    if (fresh) continue;
+    if (outOfTime(reserveMs)) {
+      log("Text routing: deadline reserve reached — remaining term sets continue next run.");
+      return false;
+    }
+    if (!ensureRegionTermSet(region, state, remote)) return false;
+  }
+  return true;
+}
+
 // Builds (or reuses) the root text-routing directory covering exactly the
 // published shard set. Any missing piece downgrades to null — the root then
 // ships without a text_routing block and clients fan out as before.
@@ -643,20 +671,7 @@ async function buildTextRoutingArtifact(built, state, remote, args, outOfTime) {
     log("Text routing: installed rangefind lacks writeTextRoutingIndex — root stays fan-out.");
     return null;
   }
-  for (const region of built) {
-    const entry = state.regions[region.id];
-    const fresh = entry.termSetFingerprint === entry.builtFingerprint && existsSync(termSetPath(region));
-    if (fresh) continue;
-    if (outOfTime(15 * 60_000)) {
-      log("Text routing: deadline near — term sets incomplete, root stays fan-out this run.");
-      return null;
-    }
-    const localManifest = join(OUT, "shards", region.id, "manifest.min.json");
-    const ok = !entry.cleaned && existsSync(localManifest)
-      ? writeRegionTermSet(region, state)
-      : (remote ? backfillRegionTermSet(region, state, remote) : false);
-    if (!ok) return null;
-  }
+  if (!prepareTextRoutingTermSets(built, state, remote, args, outOfTime, 10 * 60_000)) return null;
   const fingerprint = createHash("sha1")
     .update(JSON.stringify(built.map(region => [region.id, state.regions[region.id]?.builtFingerprint || ""])))
     .digest("hex");
@@ -1032,6 +1047,27 @@ async function main() {
   updateProgress("preparing", null, ready.length, regions.length);
   await ensureScoringStats(ready, options, state, args.forceStats, !args.regions || args.partial);
 
+  // Existing cleaned shards need one remote term-set backfill for federated
+  // routing. Do that before builds so a full nightly build window cannot
+  // starve the backfill indefinitely.
+  const builtBeforeBuild = ready.filter(region =>
+    state.regions[region.id]?.builtFingerprint
+    && existsSync(join(OUT, "shards", region.id, "manifest.min.json")));
+  const textRoutingAvailable = args.textRouting
+    && typeof rangefindShards.writeShardTermSet === "function"
+    && typeof rangefindShards.writeTextRoutingIndex === "function";
+  if (textRoutingAvailable && builtBeforeBuild.length) {
+    updateProgress("routing", null, 0, builtBeforeBuild.length);
+    prepareTextRoutingTermSets(
+      builtBeforeBuild,
+      state,
+      args.upload ? remote : null,
+      args,
+      outOfTime,
+      30 * 60_000
+    );
+  }
+
   // 4: rebuild stale shards until the deadline.
   const stale = ready.filter(region => {
     try {
@@ -1041,8 +1077,11 @@ async function main() {
     }
   });
   log(`${stale.length}/${ready.length} shard(s) need building: ${stale.map(r => r.id).join(", ") || "none"}`);
+  // Leave enough time to finish routing and atomically publish the new root.
+  // Interrupted Rangefind builds retain their stage checkpoints.
+  const finalizationReserveMs = textRoutingAvailable ? 30 * 60_000 : 10 * 60_000;
   for (const [regionIndex, region] of stale.entries()) {
-    if (outOfTime(10 * 60_000)) {
+    if (outOfTime(finalizationReserveMs)) {
       log("Deadline near — stopping before next shard build.");
       break;
     }
@@ -1070,7 +1109,7 @@ async function main() {
         saveState(state);
       }
     }
-    const ok = await buildShard(region, options, remaining() - 60_000, plan, state);
+    const ok = await buildShard(region, options, remaining() - finalizationReserveMs, plan, state);
     if (ok) {
       entry.builtFingerprint = shardFingerprint(region, state);
       entry.builtStats = statsFingerprint();

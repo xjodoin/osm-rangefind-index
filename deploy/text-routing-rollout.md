@@ -10,18 +10,23 @@ once the dependency is updated — commit `d07f297` wired it in.
 
 ```bash
 cd /srv/osm-rangefind-index
-git pull
-npm install            # brings in rangefind@^0.3.2
+git stash push --include-untracked -m pre-text-routing-rollout
+git pull --ff-only
+npm ci                 # installs the locked rangefind 0.3.2 release
 node --check scripts/update_index.mjs
 ```
 
-No config changes are needed. The next scheduled run picks everything up.
+The stash is a reversible backup of files that were deployed manually before
+their commits reached `main`; do not pop it because those changes are already
+upstream. `.env` and `work/` are ignored and remain in place. No config changes
+are needed. The next scheduled run picks everything up.
 
 ## What the first routing-enabled run does
 
-1. **Term-set backfill.** Published shards were cleaned locally (term packs
-   reclaimed), so the run downloads just `manifest*.json` + `terms/**` for
-   each published shard from R2 and writes a small sidecar to
+1. **Term-set backfill.** Before starting new shard builds, the run processes
+   published shards that were cleaned locally (their term packs were
+   reclaimed). It downloads just `manifest*.json` + `terms/**` for each
+   published shard from R2 and writes a small sidecar to
    `work/term-sets/<region>.terms.gz`. This is a one-time cost — expect the
    run to be noticeably longer than usual. Later runs regenerate a sidecar
    only for shards rebuilt or delta-updated in that run, right after the
@@ -29,7 +34,10 @@ No config changes are needed. The next scheduled run picks everything up.
 2. **Routing merge.** All sidecars merge into `work/public/rangefind/
    text-routing/` and the block lands in the root manifest. The merge is
    fingerprinted over the published shard set, so unchanged runs reuse it.
-3. **Publish ordering.** `text-routing/` uploads before the manifests flip
+3. **Reserved finalization.** Shard builds stop with 30 minutes reserved for
+   the routing merge and root publication. An interrupted shard build retains
+   its Rangefind checkpoints and resumes next run.
+4. **Publish ordering.** `text-routing/` uploads before the manifests flip
    (files are content-addressed, so clients never see a root that references
    missing objects). Old routing files linger until a `--prune` run.
 
@@ -67,11 +75,11 @@ correctly fan out).
 
 ## Cloudflare cache rules (independent, big cold-latency win)
 
-Everything on osm.rangefind.dev currently returns `cf-cache-status: DYNAMIC`
-— every range request hits R2. `deploy/cloudflare-cache-rules.json` caches
-content-addressed `.bin`/`.bin.gz` objects for a year at the edge and in the
-browser while leaving manifests and JSON metadata uncached (publishes stay
-atomic). Apply once with a token that has Zone → Cache Rules → Edit:
+The production cache rule is already active: content-addressed
+`.bin`/`.bin.gz` objects return `cf-cache-status: HIT` after warm-up, while
+manifests and JSON metadata remain uncached so publishes stay atomic. On a new
+zone, apply `deploy/cloudflare-cache-rules.json` once with a token that has
+Cache Settings Edit:
 
 ```bash
 curl --request POST \
