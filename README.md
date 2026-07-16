@@ -158,5 +158,16 @@ await engine.search({ q: "1234 rue sainte-catherine", size: 5 });
 await engine.search({ q: "", geo: { near: { lat: 45.5, lon: -73.6 }, sort: "distance" } });
 ```
 
-Suggested cache rules: long/immutable TTL for everything except
-`manifest*.json` (short TTL — it's the only mutable object).
+`deploy/cloudflare-cache-rules.json` enables a one-year edge and browser TTL
+for content-addressed `.bin` and `.bin.gz` objects on `osm.rangefind.dev`.
+Those names include a content hash and are immutable. Mutable HTML,
+`status.json`, manifests, `.json.gz` metadata, and the root manifest remain
+uncached so a newly published index becomes visible atomically. Create the
+zone cache ruleset with a token that has Cache Settings Edit access:
+
+```bash
+curl --request POST \
+  "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/rulesets" \
+  --header "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+  --json @deploy/cloudflare-cache-rules.json
+```

@@ -1,0 +1,47 @@
+{
+  "name": "osm.rangefind.dev cache rules",
+  "description": "Cache immutable Rangefind index objects served from R2",
+  "kind": "zone",
+  "phase": "http_request_cache_settings",
+  "rules": [
+    {
+      "ref": "osm_rangefind_immutable_objects",
+      "description": "Cache content-addressed Rangefind objects for one year",
+      "expression": "(http.host eq \"osm.rangefind.dev\" and (ends_with(http.request.uri.path, \".bin\") or ends_with(http.request.uri.path, \".bin.gz\")))",
+      "action": "set_cache_settings",
+      "action_parameters": {
+        "cache": true,
+        "edge_ttl": {
+          "mode": "override_origin",
+          "default": 31536000,
+          "status_code_ttl": [
+            {
+              "status_code_range": {
+                "to": 299
+              },
+              "value": 31536000
+            },
+            {
+              "status_code_range": {
+                "from": 300,
+                "to": 499
+              },
+              "value": 0
+            },
+            {
+              "status_code_range": {
+                "from": 500
+              },
+              "value": -1
+            }
+          ]
+        },
+        "browser_ttl": {
+          "mode": "override_origin",
+          "default": 31536000
+        }
+      },
+      "enabled": true
+    }
+  ]
+}
