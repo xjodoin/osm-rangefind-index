@@ -58,6 +58,10 @@ import { createGunzip, createGzip } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import { collectScoringStats, loadScoringStats } from "rangefind/scoring-stats";
 import { writeShardedRootManifest } from "rangefind/shards";
+// Namespace import for feature detection: writeShardTermSet /
+// writeTextRoutingIndex only exist on rangefind > 0.3.1; older versions
+// publish a fan-out root (no text_routing block) instead of failing.
+import * as rangefindShards from "rangefind/shards";
 import { readConfig } from "rangefind/config";
 import { createOsmIndexConfig } from "rangefind/osm/node";
 import { extractOsmPlaces } from "rangefind/osm/extract";
@@ -79,7 +83,8 @@ function parseArgs(argv) {
     prune: false,
     status: false,
     keepArtifacts: false,
-    partial: false
+    partial: false,
+    textRouting: true
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -92,6 +97,7 @@ function parseArgs(argv) {
     else if (arg === "--status") args.status = true;
     else if (arg === "--keep-artifacts") args.keepArtifacts = true;
     else if (arg === "--partial") args.partial = true;
+    else if (arg === "--no-text-routing") args.textRouting = false;
     else throw new Error(`Unknown argument: ${arg}`);
   }
   return args;
@@ -556,9 +562,127 @@ function uploadShard(region, remote, prune) {
   }
 }
 
-function uploadRoot(remote) {
+function uploadRoot(remote, args) {
+  // Routing artifacts are content-addressed, so copying them before the
+  // manifests flip keeps the remote consistent at every instant. Old files
+  // linger until a --prune run syncs them away.
+  if (existsSync(join(OUT, "text-routing"))) {
+    rclone(["copy", join(OUT, "text-routing"), `${remote}/text-routing`, "--size-only", "--transfers", "8"]);
+  }
   for (const name of ["manifest.json", "manifest.min.json"]) {
     rclone(["copyto", join(OUT, name), `${remote}/${name}`]);
+  }
+  if (args?.prune && existsSync(join(OUT, "text-routing"))) {
+    rclone(["sync", join(OUT, "text-routing"), `${remote}/text-routing`, "--size-only", "--transfers", "8"]);
+  }
+}
+
+// --- text routing --------------------------------------------------------------
+
+// Term-set sidecars survive shard cleanup: routing rebuilds merge these small
+// files instead of re-reading (possibly reclaimed) shard term directories.
+const TERM_SETS_DIR = join(WORK, "term-sets");
+const TEXT_ROUTING_BLOCK_PATH = join(WORK, "text-routing-block.json");
+
+function termSetPath(region) {
+  return join(TERM_SETS_DIR, `${region.id.replaceAll("/", "-")}.terms.gz`);
+}
+
+function writeRegionTermSet(region, state) {
+  if (typeof rangefindShards.writeShardTermSet !== "function") return false;
+  const entry = state.regions[region.id];
+  try {
+    const started = Date.now();
+    const written = rangefindShards.writeShardTermSet({
+      dir: join(OUT, "shards", region.id),
+      outFile: termSetPath(region)
+    });
+    entry.termSetFingerprint = entry.builtFingerprint;
+    saveState(state);
+    log(`${region.id}: term set written (${written.terms.toLocaleString()} terms, ${Math.round((Date.now() - started) / 1000)}s).`);
+    return true;
+  } catch (error) {
+    log(`${region.id}: term set failed (${error.message}) — text routing skipped until it succeeds.`);
+    return false;
+  }
+}
+
+// Published-then-cleaned shards have no local term directory; pull just the
+// manifests + terms of the remote copy to regenerate the sidecar once.
+function backfillRegionTermSet(region, state, remote) {
+  const tempDir = join(WORK, "term-backfill", region.id.replaceAll("/", "-"));
+  rmSync(tempDir, { recursive: true, force: true });
+  try {
+    rclone(["copy", `${remote}/shards/${region.id}`, tempDir,
+      "--include", "manifest*.json",
+      "--include", "terms/**",
+      "--include", "gen-*/manifest*.json",
+      "--include", "gen-*/terms/**",
+      "--transfers", "8"]);
+    const started = Date.now();
+    const written = rangefindShards.writeShardTermSet({ dir: tempDir, outFile: termSetPath(region) });
+    const entry = state.regions[region.id];
+    entry.termSetFingerprint = entry.uploadedFingerprint || entry.builtFingerprint;
+    saveState(state);
+    log(`${region.id}: term set backfilled from remote (${written.terms.toLocaleString()} terms, ${Math.round((Date.now() - started) / 1000)}s).`);
+    return true;
+  } catch (error) {
+    log(`${region.id}: term set backfill failed (${error.message}).`);
+    return false;
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+// Builds (or reuses) the root text-routing directory covering exactly the
+// published shard set. Any missing piece downgrades to null — the root then
+// ships without a text_routing block and clients fan out as before.
+async function buildTextRoutingArtifact(built, state, remote, args, outOfTime) {
+  if (!args.textRouting) return null;
+  if (typeof rangefindShards.writeTextRoutingIndex !== "function") {
+    log("Text routing: installed rangefind lacks writeTextRoutingIndex — root stays fan-out.");
+    return null;
+  }
+  for (const region of built) {
+    const entry = state.regions[region.id];
+    const fresh = entry.termSetFingerprint === entry.builtFingerprint && existsSync(termSetPath(region));
+    if (fresh) continue;
+    if (outOfTime(15 * 60_000)) {
+      log("Text routing: deadline near — term sets incomplete, root stays fan-out this run.");
+      return null;
+    }
+    const localManifest = join(OUT, "shards", region.id, "manifest.min.json");
+    const ok = !entry.cleaned && existsSync(localManifest)
+      ? writeRegionTermSet(region, state)
+      : (remote ? backfillRegionTermSet(region, state, remote) : false);
+    if (!ok) return null;
+  }
+  const fingerprint = createHash("sha1")
+    .update(JSON.stringify(built.map(region => [region.id, state.regions[region.id]?.builtFingerprint || ""])))
+    .digest("hex");
+  const existing = loadJson(TEXT_ROUTING_BLOCK_PATH, null);
+  if (state.textRoutingFingerprint === fingerprint && existing && existsSync(join(OUT, "text-routing"))) {
+    return existing;
+  }
+  if (outOfTime(10 * 60_000)) {
+    log("Text routing: deadline near — merge deferred to next run, root stays fan-out.");
+    return null;
+  }
+  try {
+    const started = Date.now();
+    rmSync(join(OUT, "text-routing"), { recursive: true, force: true });
+    const block = await rangefindShards.writeTextRoutingIndex({
+      outDir: OUT,
+      shards: built.map(region => ({ id: region.id, termSet: termSetPath(region) }))
+    });
+    writeFileSync(TEXT_ROUTING_BLOCK_PATH, JSON.stringify(block));
+    state.textRoutingFingerprint = fingerprint;
+    saveState(state);
+    log(`Text routing: ${block.term_count.toLocaleString()} terms over ${built.length} shard(s) in ${Math.round((Date.now() - started) / 1000)}s.`);
+    return block;
+  } catch (error) {
+    log(`Text routing build failed (root stays fan-out): ${error.message}`);
+    return null;
   }
 }
 
@@ -957,6 +1081,8 @@ async function main() {
       entry.cleaned = false;
       saveState(state);
       log(`${region.id}: shard ${plan.update ? "delta applied" : "built"} (${shardGenerationCount(region)} generation(s)).`);
+      // Term sets must be captured before cleanup reclaims the term packs.
+      if (args.textRouting) writeRegionTermSet(region, state);
       if (args.upload && !outOfTime(2 * 60_000)) {
         updateProgress("publishing", region, regionIndex + 1, stale.length);
         await uploadAndCleanupShard(region, state, remote, args);
@@ -978,6 +1104,7 @@ async function main() {
     return;
   }
   const stats = loadScoringStats(statsPath());
+  const textRouting = await buildTextRoutingArtifact(built, state, args.upload ? remote : null, args, outOfTime);
   const rootManifest = writeShardedRootManifest({
     outDir: OUT,
     shards: built.map(region => ({
@@ -987,6 +1114,7 @@ async function main() {
       groups: region.groups
     })),
     scoringStats: stats,
+    textRouting,
     extra: {
       // Root-level provenance: the OSM attribution block without any
       // region-specific fields; per-shard manifests carry source URLs and
@@ -1036,7 +1164,7 @@ async function main() {
     });
     if (allUploaded) {
       updateProgress("publishing", null, built.length, built.length);
-      uploadRoot(remote);
+      uploadRoot(remote, args);
       state.rootPublishedAt = new Date().toISOString();
       state.publishedRoot = {
         shards: rootManifest.shards.length,
