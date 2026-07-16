@@ -7,6 +7,10 @@
 // stops cleanly. All heavy steps are incremental and resumable, so a run
 // killed mid-build simply continues the next night:
 //
+//   0. bootstrap  — once every corpus exists, finish the initial build and
+//                   publication before checking for newer upstream PBFs.
+//                   This prevents daily Geofabrik updates from starving the
+//                   initial shard build indefinitely.
 //   1. refresh    — download a region's Geofabrik PBF only when upstream
 //                   changed (Last-Modified) or nothing local remains.
 //   2. extract    — PBF → places JSONL, only when the PBF changed.
@@ -207,6 +211,15 @@ function regionJsonlGz(region) {
 
 function hasCorpus(region) {
   return existsSync(regionJsonl(region)) || existsSync(regionJsonlGz(region));
+}
+
+function bootstrapPublicationPending(regions, state, upload) {
+  if (!regions.every(hasCorpus)) return false;
+  const published = new Set(state.publishedRoot?.regionIds || []);
+  return regions.some(region => {
+    const entry = state.regions[region.id] || {};
+    return !entry.builtFingerprint || (upload && !published.has(region.id));
+  });
 }
 
 // Re-materializes the plain JSONL from its compressed snapshot when a build
@@ -807,62 +820,77 @@ async function main() {
 
   try {
 
-  // 1 + 2: refresh and extract selected regions. Downloads may overlap with
-  // extraction; normal extracts share the configured lanes, while a large
-  // PBF takes every lane so two memory-heavy regions can never overlap.
-  const acquisitionConcurrency = Math.min(options.acquisitionConcurrency, regions.length);
-  const withExtractionCapacity = createWeightedLimiter(acquisitionConcurrency);
-  const activeRegions = new Set();
-  let acquisitionCursor = 0;
-  let acquisitionCompleted = 0;
-  const reportAcquisition = region => updateProgress(
-    "acquiring",
-    region,
-    acquisitionCompleted,
-    regions.length,
-    { regions: [...activeRegions] }
-  );
-  const acquireRegions = async () => {
-    while (!outOfTime()) {
-      const regionIndex = acquisitionCursor++;
-      if (regionIndex >= regions.length) return;
-      const region = regions[regionIndex];
-      activeRegions.add(region.id);
-      reportAcquisition(region);
-      try {
-        const source = await refreshPbf(region, state);
-        const large = source.bytes >= options.largePbfBytes;
-        if (large) {
-          log(`${region.id}: large PBF (${(source.bytes / 1024 / 1024 / 1024).toFixed(1)} GiB) — extracting exclusively`);
-        }
-        const extracted = await withExtractionCapacity(
-          large ? acquisitionConcurrency : 1,
-          () => extractJsonl(region, state)
-        );
-        if (extracted) {
-          log(`${region.id}: corpus refreshed (${(state.regions[region.id].docs || 0).toLocaleString()} docs)`);
-          if (!state.regions[region.id].builtFingerprint) {
-            // Bring-up acquisition: no shard exists yet, so the corpus is not
-            // a diff base — compress it now and drop the PBF, keeping the
-            // acquisition footprint near the gzipped corpus total instead of
-            // hundreds of GB of PBFs + plain JSONL.
-            await compressJsonl(region);
-            if (!region.pinned) rmSync(region.pbf, { force: true });
+  // 1 + 2: refresh and extract selected regions. Once every corpus exists,
+  // the initial build takes priority until every selected shard has been
+  // built (and, for uploaded runs, included in the published root). Without
+  // this gate, daily upstream changes can consume every nightly window and
+  // starve the initial build forever.
+  const buildFirst = !args.regions
+    && !args.partial
+    && bootstrapPublicationPending(regions, state, args.upload);
+  if (buildFirst) {
+    const published = new Set(state.publishedRoot?.regionIds || []);
+    const builtCount = regions.filter(region => state.regions[region.id]?.builtFingerprint).length;
+    const publishedCount = regions.filter(region => published.has(region.id)).length;
+    log(`Bootstrap build-first: ${builtCount}/${regions.length} built, ${publishedCount}/${regions.length} published — skipping upstream refresh.`);
+  } else {
+    // Downloads may overlap with extraction; normal extracts share the
+    // configured lanes, while a large PBF takes every lane so two
+    // memory-heavy regions can never overlap.
+    const acquisitionConcurrency = Math.min(options.acquisitionConcurrency, regions.length);
+    const withExtractionCapacity = createWeightedLimiter(acquisitionConcurrency);
+    const activeRegions = new Set();
+    let acquisitionCursor = 0;
+    let acquisitionCompleted = 0;
+    const reportAcquisition = region => updateProgress(
+      "acquiring",
+      region,
+      acquisitionCompleted,
+      regions.length,
+      { regions: [...activeRegions] }
+    );
+    const acquireRegions = async () => {
+      while (!outOfTime()) {
+        const regionIndex = acquisitionCursor++;
+        if (regionIndex >= regions.length) return;
+        const region = regions[regionIndex];
+        activeRegions.add(region.id);
+        reportAcquisition(region);
+        try {
+          const source = await refreshPbf(region, state);
+          const large = source.bytes >= options.largePbfBytes;
+          if (large) {
+            log(`${region.id}: large PBF (${(source.bytes / 1024 / 1024 / 1024).toFixed(1)} GiB) — extracting exclusively`);
           }
+          const extracted = await withExtractionCapacity(
+            large ? acquisitionConcurrency : 1,
+            () => extractJsonl(region, state)
+          );
+          if (extracted) {
+            log(`${region.id}: corpus refreshed (${(state.regions[region.id].docs || 0).toLocaleString()} docs)`);
+            if (!state.regions[region.id].builtFingerprint) {
+              // Bring-up acquisition: no shard exists yet, so the corpus is
+              // not a diff base — compress it now and drop the PBF, keeping
+              // the acquisition footprint near the gzipped corpus total
+              // instead of hundreds of GB of PBFs + plain JSONL.
+              await compressJsonl(region);
+              if (!region.pinned) rmSync(region.pbf, { force: true });
+            }
+          }
+          cleanupExtractionScratch(region);
+          saveState(state);
+        } catch (error) {
+          log(`${region.id}: refresh/extract failed — ${error.message} (continuing)`);
+        } finally {
+          activeRegions.delete(region.id);
+          acquisitionCompleted++;
         }
-        cleanupExtractionScratch(region);
-        saveState(state);
-      } catch (error) {
-        log(`${region.id}: refresh/extract failed — ${error.message} (continuing)`);
-      } finally {
-        activeRegions.delete(region.id);
-        acquisitionCompleted++;
       }
-    }
-  };
-  log(`Acquisition concurrency: ${acquisitionConcurrency} lane(s); PBFs >= ${(options.largePbfBytes / 1024 / 1024 / 1024).toFixed(1)} GiB run exclusively.`);
-  await Promise.all(Array.from({ length: acquisitionConcurrency }, () => acquireRegions()));
-  reportAcquisition(null);
+    };
+    log(`Acquisition concurrency: ${acquisitionConcurrency} lane(s); PBFs >= ${(options.largePbfBytes / 1024 / 1024 / 1024).toFixed(1)} GiB run exclusively.`);
+    await Promise.all(Array.from({ length: acquisitionConcurrency }, () => acquireRegions()));
+    reportAcquisition(null);
+  }
 
   // 3: frozen stats (regenerating cascades a full rebuild via fingerprints).
   const ready = regions.filter(region => hasCorpus(region));

@@ -50,7 +50,11 @@ until *all* regions have a corpus — otherwise each night's new arrivals
 would change the region set, regenerate the stats artifact, and invalidate
 every shard already built (`--partial` overrides the gate deliberately).
 Once acquisition completes, one stats pass runs, then shards build and
-publish region by region — every step deadline-aware and resumable.
+publish region by region — every step deadline-aware and resumable. While the
+initial root manifest is incomplete, later runs reuse those acquired snapshots
+and resume building before checking Geofabrik again. Daily upstream refreshes
+start only after every initial shard has been published, so fresh source files
+cannot starve the first complete index.
 
 Acquisition uses `acquisitionConcurrency` lanes (default `2` in the shipped
 configuration), so downloads and normal-sized extracts can overlap. A PBF at
