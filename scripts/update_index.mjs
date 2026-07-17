@@ -28,9 +28,10 @@
 //                   generation count hits maxGenerations, or the stats
 //                   artifact changed. Interrupted full builds resume from
 //                   rangefind's stage checkpoints; interrupted deltas re-run.
-//   5. publish    — rewrite the sharded root manifest over the shards that
-//                   are currently built, then rclone-sync to R2: packs
-//                   first, manifests last, so readers never see a manifest
+//   5. publish    — queue each completed shard for background rclone upload
+//                   while the next shard builds, then rewrite the sharded
+//                   root manifest after the bounded queue drains. Packs go
+//                   first and manifests last, so readers never see a manifest
 //                   that references missing objects. rclone compares against
 //                   the remote listing, so only changed objects upload —
 //                   nothing is ever downloaded back from R2.
@@ -65,6 +66,7 @@ import * as rangefindShards from "rangefind/shards";
 import { readConfig } from "rangefind/config";
 import { createOsmIndexConfig } from "rangefind/osm/node";
 import { extractOsmPlaces } from "rangefind/osm/extract";
+import { createSerialTaskQueue } from "./lib/serial_task_queue.mjs";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const WORK = join(projectRoot, "work");
@@ -543,22 +545,36 @@ function rclone(argv) {
   execFileSync("rclone", argv, { stdio: "inherit" });
 }
 
-function uploadShard(region, remote, prune) {
+function rcloneAsync(argv) {
+  log(`rclone ${argv.join(" ")}`);
+  return new Promise((resolveDone, rejectDone) => {
+    const child = spawn("rclone", argv, { stdio: "inherit" });
+    child.once("error", rejectDone);
+    child.once("exit", (code, signal) => {
+      if (code === 0) resolveDone();
+      else {
+        rejectDone(new Error(`rclone exited with ${signal ? `signal ${signal}` : `code ${code}`}`));
+      }
+    });
+  });
+}
+
+async function uploadShard(region, remote, prune) {
   const local = join(OUT, "shards", region.id);
   const target = `${remote}/shards/${region.id}`;
   const excludes = ["--exclude", "_build/**", "--exclude", "manifest*.json"];
   // Packs are content-addressed and immutable: size comparison against the
   // remote listing suffices, so unchanged objects are never re-uploaded (and
   // never downloaded). Manifests go last.
-  rclone(["copy", local, target, ...excludes, "--size-only", "--transfers", "8"]);
-  rclone(["copy", local, target, "--include", "manifest*.json", "--transfers", "4"]);
+  await rcloneAsync(["copy", local, target, ...excludes, "--size-only", "--transfers", "8"]);
+  await rcloneAsync(["copy", local, target, "--include", "manifest*.json", "--transfers", "4"]);
   if (prune) {
     // Removes remote packs no longer referenced. Only valid right after a
     // fresh build while the local copy is complete; run occasionally — a
     // reader mid-query on the previous manifest may still fetch old objects
     // for a short while.
-    rclone(["sync", local, target, ...excludes, "--size-only", "--transfers", "8"]);
-    rclone(["copy", local, target, "--include", "manifest*.json"]);
+    await rcloneAsync(["sync", local, target, ...excludes, "--size-only", "--transfers", "8"]);
+    await rcloneAsync(["copy", local, target, "--include", "manifest*.json"]);
   }
 }
 
@@ -878,7 +894,7 @@ async function cleanupRegion(region, state) {
 
 async function uploadAndCleanupShard(region, state, remote, args) {
   const entry = state.regions[region.id];
-  uploadShard(region, remote, args.prune && entry.localComplete === true);
+  await uploadShard(region, remote, args.prune && entry.localComplete === true);
   entry.uploadedFingerprint = entry.builtFingerprint;
   saveState(state);
   log(`${region.id}: shard uploaded to R2.`);
@@ -955,6 +971,29 @@ async function main() {
     saveState(state);
     publishStatusArtifacts(allRegions, state, remote, args.upload);
   };
+  const configuredUploadQueueDepth = Number(process.env.R2_UPLOAD_QUEUE_DEPTH || 2);
+  const uploadQueueDepth = Number.isInteger(configuredUploadQueueDepth) && configuredUploadQueueDepth > 0
+    ? Math.min(configuredUploadQueueDepth, 8)
+    : 2;
+  const uploadQueue = args.upload
+    ? createSerialTaskQueue({ maxPending: uploadQueueDepth })
+    : null;
+  const queueShardUpload = async region => {
+    await uploadQueue.enqueue(async () => {
+      log(`${region.id}: background upload started.`);
+      try {
+        await uploadAndCleanupShard(region, state, remote, args);
+        publishStatusArtifacts(allRegions, state, remote, true);
+      } catch (error) {
+        log(`${region.id}: background upload failed — ${error.message}`);
+        throw error;
+      }
+    });
+    log(`${region.id}: queued for background upload (${uploadQueue.pending}/${uploadQueue.capacity} pending).`);
+  };
+  if (uploadQueue) {
+    log(`Background uploads: one rclone lane, up to ${uploadQueue.capacity} shard(s) pending while the next shard builds.`);
+  }
   let runError = null;
 
   try {
@@ -1123,8 +1162,7 @@ async function main() {
       // Term sets must be captured before cleanup reclaims the term packs.
       if (args.textRouting) writeRegionTermSet(region, state);
       if (args.upload && !outOfTime(2 * 60_000)) {
-        updateProgress("publishing", region, regionIndex + 1, stale.length);
-        await uploadAndCleanupShard(region, state, remote, args);
+        await queueShardUpload(region);
       } else if (args.upload) {
         log(`${region.id}: shard ready; upload deferred because the deadline is near.`);
       }
@@ -1168,6 +1206,9 @@ async function main() {
   log(`Root manifest: ${rootManifest.shards.length} shard(s), ${rootManifest.total.toLocaleString()} docs.`);
 
   if (args.upload) {
+    // Builds run ahead of the bounded serial queue. Drain it before checking
+    // remote completeness and atomically publishing the new root manifest.
+    await uploadQueue.drain();
     for (const [regionIndex, region] of built.entries()) {
       if (outOfTime(2 * 60_000)) {
         log("Deadline near — remaining uploads next run.");

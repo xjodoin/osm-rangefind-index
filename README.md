@@ -50,18 +50,22 @@ until *all* regions have a corpus — otherwise each night's new arrivals
 would change the region set, regenerate the stats artifact, and invalidate
 every shard already built (`--partial` overrides the gate deliberately).
 Once acquisition completes, one stats pass runs, then shards build and
-publish region by region — every step deadline-aware and resumable. While the
-initial root manifest is incomplete, later runs reuse those acquired snapshots
-and resume building before checking Geofabrik again. Daily upstream refreshes
-start only after every initial shard has been published, so fresh source files
-cannot starve the first complete index.
+publish region by region — every step deadline-aware and resumable. Each
+completed shard enters a serial background rclone queue, so its upload and
+cleanup overlap the next shard build. The queue holds at most two completed
+shards by default (`R2_UPLOAD_QUEUE_DEPTH`) to bound temporary disk use. While
+the initial root manifest is incomplete, later runs reuse those acquired
+snapshots and resume building before checking Geofabrik again. Daily upstream
+refreshes start only after every initial shard has been published, so fresh
+source files cannot starve the first complete index.
 
 Acquisition uses `acquisitionConcurrency` lanes (default `2` in the shipped
 configuration), so downloads and normal-sized extracts can overlap. A PBF at
 or above `largePbfBytes` (default 1 GiB) consumes every lane and extracts
 alone to protect memory on the 31 GiB production host. Stats and shard builds
 remain sequential; each shard build already uses the configured CPU worker
-pool.
+pool. One rclone lane runs beside them, preserving packs-before-manifests
+ordering for every shard.
 
 Rough planet budget on a modern 12–16-core box: ~78 GiB of downloads
 (bandwidth-bound), a few hours of extraction, several hours for the stats
@@ -143,8 +147,9 @@ index copy is gutted to manifests + generation id-maps (what future deltas
 need). Steady state per region ≈ the gzipped corpus — e.g. Luxembourg
 ~17 MB on disk vs a 186 MB published index. Transient acquisition is bounded
 by `acquisitionConcurrency` normal regions or one large region. Shards still
-build one at a time, so build-time disk should be sized for the largest
-region rather than the full corpus.
+build one at a time, while up to `R2_UPLOAD_QUEUE_DEPTH` completed shards can
+await upload/cleanup. Size disk for the largest active build plus that bounded
+queue rather than the full corpus.
 
 ## Serving
 
