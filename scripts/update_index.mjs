@@ -910,6 +910,14 @@ async function uploadAndCleanupShard(region, state, store, args) {
   entry.uploadedFingerprint = entry.builtFingerprint;
   saveState(state);
   log(`${region.id}: shard uploaded to R2.`);
+  // A delta build may not retain the old generations' term packs locally.
+  // Once the new manifest and delta are durable, regenerate its term-set
+  // sidecar from the complete remote shard before local cleanup.
+  const termSetFresh = entry.termSetFingerprint === entry.builtFingerprint
+    && existsSync(termSetPath(region));
+  if (args.textRouting && !termSetFresh) {
+    await backfillRegionTermSet(region, state, store);
+  }
   if (!args.keepArtifacts) {
     await cleanupRegion(region, state);
     saveState(state);

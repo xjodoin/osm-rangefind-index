@@ -22,8 +22,68 @@ test("requires direct R2 configuration and does not accept an rclone remote", ()
     endpoint: env.R2_ENDPOINT,
     accessKeyId: "access",
     secretAccessKey: "secret",
-    concurrency: 4
+    concurrency: 4,
+    uploadAttempts: 6
   });
+});
+
+test("reopens file streams when an R2 edge response is transient", async () => {
+  const attempts = [];
+  const waits = [];
+  const client = {
+    send: async command => {
+      let content = "";
+      for await (const chunk of command.input.Body) content += chunk;
+      attempts.push(content);
+      if (attempts.length === 1) {
+        const error = new Error("@aws-sdk XML parse error: mismatched tags <hr> and </body>.");
+        error.$metadata = { httpStatusCode: 400 };
+        throw error;
+      }
+      return {};
+    },
+    destroy() {}
+  };
+  const directory = mkdtempSync(join(tmpdir(), "r2-store-retry-test-"));
+  const file = join(directory, "pack.bin");
+  writeFileSync(file, "retry me");
+  try {
+    const store = createR2Store({
+      env: { ...env, R2_UPLOAD_ATTEMPTS: "3" },
+      client,
+      sleep: async waitMs => waits.push(waitMs),
+      onRetry: () => {}
+    });
+    await store.putFile(file, "shards/quebec/pack.bin");
+    assert.deepEqual(attempts, ["retry me", "retry me"]);
+    assert.deepEqual(waits, [500]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("does not retry genuine R2 request errors", async () => {
+  let attempts = 0;
+  const client = {
+    send: async command => {
+      for await (const _chunk of command.input.Body) { /* consume mocked upload */ }
+      attempts++;
+      const error = new Error("Access denied");
+      error.$metadata = { httpStatusCode: 403 };
+      throw error;
+    },
+    destroy() {}
+  };
+  const directory = mkdtempSync(join(tmpdir(), "r2-store-no-retry-test-"));
+  const file = join(directory, "pack.bin");
+  writeFileSync(file, "content");
+  try {
+    const store = createR2Store({ env, client, sleep: async () => {} });
+    await assert.rejects(store.putFile(file, "pack.bin"), /Access denied/u);
+    assert.equal(attempts, 1);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("uploads files with immutable metadata and the configured key prefix", async () => {

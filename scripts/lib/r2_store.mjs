@@ -9,8 +9,21 @@ import {
 import { createReadStream, createWriteStream, mkdirSync, readdirSync, renameSync, statSync } from "node:fs";
 import { dirname, join, posix, relative } from "node:path";
 import { pipeline } from "node:stream/promises";
+import { setTimeout as delay } from "node:timers/promises";
 
 const IMMUTABLE_OBJECT = /\.bin(?:\.gz)?$/u;
+const TRANSIENT_NETWORK_ERRORS = new Set([
+  "ECONNRESET",
+  "ECONNREFUSED",
+  "EPIPE",
+  "ETIMEDOUT",
+  "EAI_AGAIN",
+  "ENETDOWN",
+  "ENETUNREACH",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "UND_ERR_HEADERS_TIMEOUT",
+  "UND_ERR_SOCKET"
+]);
 
 function normalizePrefix(value) {
   const prefix = String(value || "").replace(/^\/+|\/+$/gu, "");
@@ -24,10 +37,24 @@ export function r2ConfigFromEnv(env = process.env) {
   const accessKeyId = env.R2_ACCESS_KEY_ID || "";
   const secretAccessKey = env.R2_SECRET_ACCESS_KEY || "";
   const concurrency = Math.max(1, Math.min(64, Number(env.R2_REQUEST_CONCURRENCY || 16) || 16));
+  const uploadAttempts = Math.max(1, Math.min(10, Number(env.R2_UPLOAD_ATTEMPTS || 6) || 6));
   if (!bucket) throw new Error("Set R2_BUCKET.");
   if (!endpoint) throw new Error("Set R2_ENDPOINT.");
   if (!accessKeyId || !secretAccessKey) throw new Error("Set R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY.");
-  return { bucket, prefix: normalizePrefix(prefix), endpoint, accessKeyId, secretAccessKey, concurrency };
+  return { bucket, prefix: normalizePrefix(prefix), endpoint, accessKeyId, secretAccessKey, concurrency, uploadAttempts };
+}
+
+function isRetryableUploadError(error) {
+  const status = Number(error?.$metadata?.httpStatusCode || 0);
+  const message = String(error?.message || "");
+  return Boolean(error?.$retryable)
+    || TRANSIENT_NETWORK_ERRORS.has(error?.code)
+    || status === 408
+    || status === 429
+    || status >= 500
+    // R2 occasionally returns an HTML edge-error response with status 400.
+    // The S3 XML parser then fails before it can expose a service error code.
+    || (status === 400 && /XML parse error|Deserialization error|mismatched tags/iu.test(message));
 }
 
 function createLimiter(limit) {
@@ -77,7 +104,14 @@ function metadataFor(path) {
   return { ContentType: "application/octet-stream" };
 }
 
-export function createR2Store({ env = process.env, client = null } = {}) {
+export function createR2Store({
+  env = process.env,
+  client = null,
+  sleep = delay,
+  onRetry = ({ path, attempt, attempts, waitMs, error }) => {
+    console.warn(`[r2] ${path}: transient upload failure (${error.message}); retry ${attempt + 1}/${attempts} in ${waitMs}ms.`);
+  }
+} = {}) {
   const config = r2ConfigFromEnv(env);
   const s3 = client || new S3Client({
     region: "auto",
@@ -104,13 +138,25 @@ export function createR2Store({ env = process.env, client = null } = {}) {
   async function putFile(localPath, remotePath) {
     return limited(async () => {
       const stat = statSync(localPath);
-      await s3.send(new PutObjectCommand({
-        Bucket: config.bucket,
-        Key: keyOf(remotePath),
-        Body: createReadStream(localPath),
-        ContentLength: stat.size,
-        ...metadataFor(remotePath)
-      }));
+      for (let attempt = 1; ; attempt++) {
+        const body = createReadStream(localPath);
+        try {
+          await s3.send(new PutObjectCommand({
+            Bucket: config.bucket,
+            Key: keyOf(remotePath),
+            Body: body,
+            ContentLength: stat.size,
+            ...metadataFor(remotePath)
+          }));
+          break;
+        } catch (error) {
+          body.destroy();
+          if (attempt >= config.uploadAttempts || !isRetryableUploadError(error)) throw error;
+          const waitMs = Math.min(8_000, 500 * (2 ** (attempt - 1)));
+          onRetry?.({ path: remotePath, attempt, attempts: config.uploadAttempts, waitMs, error });
+          await sleep(waitMs);
+        }
+      }
       return { path: remotePath, bytes: stat.size };
     });
   }
