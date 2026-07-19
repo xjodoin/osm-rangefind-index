@@ -47,7 +47,7 @@
 //
 // Environment (see .env.example): direct Cloudflare R2/S3 credentials.
 
-import { spawn } from "node:child_process";
+import { fork, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
@@ -608,20 +608,40 @@ async function uploadRoot(store, args) {
 // files instead of re-reading (possibly reclaimed) shard term directories.
 const TERM_SETS_DIR = join(WORK, "term-sets");
 const TEXT_ROUTING_BLOCK_PATH = join(WORK, "text-routing-block.json");
+const TEXT_ROUTING_WORKER = join(projectRoot, "scripts/text_routing_worker.mjs");
 
 function termSetPath(region) {
   return join(TERM_SETS_DIR, `${region.id.replaceAll("/", "-")}.terms.gz`);
 }
 
-function writeRegionTermSet(region, state) {
+function runTextRoutingWorker(args, heapMb = 4096) {
+  return new Promise((resolveDone, rejectDone) => {
+    let result;
+    const child = fork(TEXT_ROUTING_WORKER, args, {
+      execArgv: [`--max-old-space-size=${heapMb}`],
+      stdio: ["ignore", "inherit", "inherit", "ipc"]
+    });
+    child.on("message", message => {
+      if (message?.type === "result") result = message.value;
+    });
+    child.on("error", rejectDone);
+    child.on("exit", (code, signal) => {
+      if (code === 0 && result) resolveDone(result);
+      else rejectDone(new Error(`text routing worker failed (${signal || `exit ${code}`})`));
+    });
+  });
+}
+
+async function writeRegionTermSet(region, state) {
   if (typeof rangefindShards.writeShardTermSet !== "function") return false;
   const entry = state.regions[region.id];
   try {
     const started = Date.now();
-    const written = rangefindShards.writeShardTermSet({
-      dir: join(OUT, "shards", region.id),
-      outFile: termSetPath(region)
-    });
+    const written = await runTextRoutingWorker([
+      "term-set",
+      join(OUT, "shards", region.id),
+      termSetPath(region)
+    ]);
     entry.termSetFingerprint = entry.builtFingerprint;
     saveState(state);
     log(`${region.id}: term set written (${written.terms.toLocaleString()} terms, ${Math.round((Date.now() - started) / 1000)}s).`);
@@ -646,7 +666,7 @@ async function backfillRegionTermSet(region, state, store) {
       || /^gen-[^/]+\/terms\//u.test(relative)
     ));
     const started = Date.now();
-    const written = rangefindShards.writeShardTermSet({ dir: tempDir, outFile: termSetPath(region) });
+    const written = await runTextRoutingWorker(["term-set", tempDir, termSetPath(region)]);
     const entry = state.regions[region.id];
     entry.termSetFingerprint = entry.uploadedFingerprint || entry.builtFingerprint;
     saveState(state);
@@ -665,7 +685,7 @@ async function ensureRegionTermSet(region, state, store) {
   const fresh = entry.termSetFingerprint === entry.builtFingerprint && existsSync(termSetPath(region));
   if (fresh) return true;
   const localManifest = join(OUT, "shards", region.id, "manifest.min.json");
-  if (!entry.cleaned && existsSync(localManifest) && writeRegionTermSet(region, state)) return true;
+  if (!entry.cleaned && existsSync(localManifest) && await writeRegionTermSet(region, state)) return true;
   return store ? backfillRegionTermSet(region, state, store) : false;
 }
 
@@ -712,10 +732,13 @@ async function buildTextRoutingArtifact(built, state, store, args, outOfTime) {
   try {
     const started = Date.now();
     rmSync(join(OUT, "text-routing"), { recursive: true, force: true });
-    const block = await rangefindShards.writeTextRoutingIndex({
+    const workerConfig = join(WORK, "text-routing-worker.json");
+    writeFileSync(workerConfig, JSON.stringify({
       outDir: OUT,
       shards: built.map(region => ({ id: region.id, termSet: termSetPath(region) }))
-    });
+    }));
+    const routingHeapMb = Math.max(4096, Math.min(24576, Number(process.env.TEXT_ROUTING_HEAP_MB || 12288) || 12288));
+    const block = await runTextRoutingWorker(["routing", workerConfig], routingHeapMb);
     writeFileSync(TEXT_ROUTING_BLOCK_PATH, JSON.stringify(block));
     state.textRoutingFingerprint = fingerprint;
     saveState(state);
@@ -809,17 +832,46 @@ function writeStatusArtifacts(regions, state) {
 }
 
 let statusUploadTail = Promise.resolve();
+let statusUploadRunning = false;
+let statusUploadRequested = false;
+let statusPageRequested = false;
+
+function startStatusUpload(store) {
+  if (statusUploadRunning) return statusUploadTail;
+  statusUploadRunning = true;
+  statusUploadTail = (async () => {
+    while (statusUploadRequested) {
+      statusUploadRequested = false;
+      const includePage = statusPageRequested;
+      statusPageRequested = false;
+      const names = includePage ? ["index.html", "status.json"] : ["status.json"];
+      try {
+        for (const name of names) await store.putFile(join(OUT, name), name);
+      } catch (error) {
+        log(`Status page upload failed — ${error.message}`);
+      }
+    }
+  })().finally(() => {
+    statusUploadRunning = false;
+    if (statusUploadRequested) startStatusUpload(store);
+  });
+  return statusUploadTail;
+}
+
+async function flushStatusUploads(store) {
+  while (statusUploadRunning || statusUploadRequested) {
+    if (!statusUploadRunning && statusUploadRequested) startStatusUpload(store);
+    await statusUploadTail;
+  }
+}
 
 function publishStatusArtifacts(regions, state, store, upload, includePage = false) {
   try {
     writeStatusArtifacts(regions, state);
     if (upload) {
-      const names = includePage ? ["index.html", "status.json"] : ["status.json"];
-      statusUploadTail = statusUploadTail
-        .then(async () => {
-          for (const name of names) await store.putFile(join(OUT, name), name);
-        })
-        .catch(error => log(`Status page upload failed — ${error.message}`));
+      statusUploadRequested = true;
+      statusPageRequested ||= includePage;
+      startStatusUpload(store);
     }
   } catch (error) {
     log(`Status page update failed — ${error.message}`);
@@ -1182,8 +1234,13 @@ async function main() {
       entry.cleaned = false;
       saveState(state);
       log(`${region.id}: shard ${plan.update ? "delta applied" : "built"} (${shardGenerationCount(region)} generation(s)).`);
-      // Term sets must be captured before cleanup reclaims the term packs.
-      if (args.textRouting) writeRegionTermSet(region, state);
+      // Full builds capture their term set before cleanup. Delta indexes
+      // reference old generation term packs that were reclaimed
+      // locally. Their sidecar is regenerated from the complete remote shard
+      // immediately after upload instead.
+      if (args.textRouting && (!plan.update || !args.upload)) {
+        await writeRegionTermSet(region, state);
+      }
       if (args.upload && !outOfTime(2 * 60_000)) {
         await queueShardUpload(region);
       } else if (args.upload) {
@@ -1295,7 +1352,8 @@ async function main() {
     };
     if (!runError) state.lastSuccessfulRunAt = completedAt;
     saveState(state);
-    await publishStatusArtifacts(allRegions, state, store, args.upload);
+    publishStatusArtifacts(allRegions, state, store, args.upload);
+    if (args.upload) await flushStatusUploads(store);
     store?.close();
   }
 }
