@@ -86,6 +86,8 @@ npm run update -- --deadline 06:15    # stop cleanly before the workday
 npm run update -- --regions quebec    # limit to one region
 npm run status                         # what's built / uploaded / pending
 npm run update -- --prune             # occasional: delete unreferenced packs on R2
+npm run gc:r2                          # dry-run manifest-aware R2 garbage collection
+npm run gc:r2 -- --apply              # track/delete objects after the grace period
 ```
 
 ## Scheduling (cron)
@@ -136,6 +138,15 @@ and the root manifest uploads only after every built shard is fully synced.
 Old packs are left in place until a `--prune` run so in-flight readers on the
 previous manifest never 404 (prune runs only on freshly rebuilt shards whose
 local mirror is complete).
+
+`scripts/r2_gc.sh` handles leftovers after local shard cleanup. It takes the
+same launcher lock as the indexer, marks immutable objects referenced by the
+live root/shard/generation manifests, and tracks everything else in
+`work/r2-gc-state.json`. An object must remain continuously unreferenced for
+seven days before `--apply` deletes it; its upload age alone is never enough.
+The weekly systemd timer runs Friday at 07:00 Montreal time. The first apply
+run only establishes the grace-period baseline, and every run writes
+`work/r2-gc-last-report.json` plus `logs/r2-gc.log`.
 
 ## Disk usage
 

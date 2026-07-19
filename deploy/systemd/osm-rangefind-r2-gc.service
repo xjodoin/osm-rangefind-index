@@ -1,0 +1,12 @@
+[Unit]
+Description=Manifest-aware cleanup of unreferenced OSM Rangefind R2 objects
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/srv/osm-rangefind-index
+Environment=R2_GC_LOG_FILE=logs/r2-gc.log
+ExecStart=/srv/osm-rangefind-index/scripts/r2_gc.sh --apply --grace-days 7

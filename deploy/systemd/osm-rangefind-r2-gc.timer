@@ -1,0 +1,10 @@
+[Unit]
+Description=Run OSM Rangefind R2 cleanup weekly after the Thursday index window
+
+[Timer]
+OnCalendar=Fri *-*-* 07:00:00 America/Montreal
+AccuracySec=5min
+Unit=osm-rangefind-r2-gc.service
+
+[Install]
+WantedBy=timers.target
