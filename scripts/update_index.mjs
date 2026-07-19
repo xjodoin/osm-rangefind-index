@@ -28,13 +28,12 @@
 //                   generation count hits maxGenerations, or the stats
 //                   artifact changed. Interrupted full builds resume from
 //                   rangefind's stage checkpoints; interrupted deltas re-run.
-//   5. publish    — queue each completed shard for background rclone upload
+//   5. publish    — queue each completed shard for direct background R2 upload
 //                   while the next shard builds, then rewrite the sharded
 //                   root manifest after the bounded queue drains. Packs go
 //                   first and manifests last, so readers never see a manifest
-//                   that references missing objects. rclone compares against
-//                   the remote listing, so only changed objects upload —
-//                   nothing is ever downloaded back from R2.
+//                   that references missing objects. A shared S3 request pool
+//                   batches immutable object PUTs across completed shards.
 //   6. cleanup    — after a shard is uploaded, reclaim the space: drop the
 //                   PBF and extractor caches, gzip the corpus JSONL, and gut
 //                   the local index copy down to its manifests. Steady-state
@@ -46,9 +45,9 @@
 //     [--regions id,id] [--no-upload] [--force-stats] [--prune]
 //     [--keep-artifacts] [--status]
 //
-// Environment (see .env.example): R2_REMOTE (rclone remote:bucket/prefix).
+// Environment (see .env.example): direct Cloudflare R2/S3 credentials.
 
-import { execFileSync, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
@@ -66,7 +65,8 @@ import * as rangefindShards from "rangefind/shards";
 import { readConfig } from "rangefind/config";
 import { createOsmIndexConfig } from "rangefind/osm/node";
 import { extractOsmPlaces } from "rangefind/osm/extract";
-import { createSerialTaskQueue } from "./lib/serial_task_queue.mjs";
+import { createR2Store, listLocalFiles } from "./lib/r2_store.mjs";
+import { createTaskQueue } from "./lib/serial_task_queue.mjs";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const WORK = join(projectRoot, "work");
@@ -540,57 +540,66 @@ async function buildShard(region, options, budgetMs, plan, state) {
 
 // --- step 5: publish ---------------------------------------------------------
 
-function rclone(argv) {
-  log(`rclone ${argv.join(" ")}`);
-  execFileSync("rclone", argv, { stdio: "inherit" });
+function isManifestFile(path) {
+  return /^manifest.*\.json$/u.test(path.split("/").pop());
 }
 
-function rcloneAsync(argv) {
-  log(`rclone ${argv.join(" ")}`);
-  return new Promise((resolveDone, rejectDone) => {
-    const child = spawn("rclone", argv, { stdio: "inherit" });
-    child.once("error", rejectDone);
-    child.once("exit", (code, signal) => {
-      if (code === 0) resolveDone();
-      else {
-        rejectDone(new Error(`rclone exited with ${signal ? `signal ${signal}` : `code ${code}`}`));
-      }
-    });
-  });
+function partitionPublishFiles(root) {
+  const files = listLocalFiles(root).filter(file => !file.relative.startsWith("_build/"));
+  const content = files.filter(file => !isManifestFile(file.relative));
+  const manifests = files.filter(file => isManifestFile(file.relative));
+  const rootNames = new Set(["manifest.json", "manifest.min.json", "manifest.full.json"]);
+  return {
+    files,
+    content,
+    dependencyManifests: manifests.filter(file => !rootNames.has(file.relative)),
+    rootManifests: manifests.filter(file => rootNames.has(file.relative))
+  };
 }
 
-async function uploadShard(region, remote, prune) {
+async function uploadShard(region, store, prune) {
   const local = join(OUT, "shards", region.id);
-  const target = `${remote}/shards/${region.id}`;
-  const excludes = ["--exclude", "_build/**", "--exclude", "manifest*.json"];
-  // Packs are content-addressed and immutable: size comparison against the
-  // remote listing suffices, so unchanged objects are never re-uploaded (and
-  // never downloaded). Manifests go last.
-  await rcloneAsync(["copy", local, target, ...excludes, "--size-only", "--transfers", "8"]);
-  await rcloneAsync(["copy", local, target, "--include", "manifest*.json", "--transfers", "4"]);
+  const target = `shards/${region.id}`;
+  const publish = partitionPublishFiles(local);
+  const started = Date.now();
+  const contentResult = await store.putFiles(publish.content, target);
+  await store.putFiles(publish.dependencyManifests, target);
+  // Stable shard manifests flip only after every immutable object and
+  // generation-scoped manifest they reference is durable in R2.
+  await store.putFiles(publish.rootManifests, target);
   if (prune) {
-    // Removes remote packs no longer referenced. Only valid right after a
-    // fresh build while the local copy is complete; run occasionally — a
-    // reader mid-query on the previous manifest may still fetch old objects
-    // for a short while.
-    await rcloneAsync(["sync", local, target, ...excludes, "--size-only", "--transfers", "8"]);
-    await rcloneAsync(["copy", local, target, "--include", "manifest*.json"]);
+    const keep = new Set(publish.files.map(file => `${target}/${file.relative}`));
+    const stale = (await store.listObjects(`${target}/`))
+      .map(object => object.path)
+      .filter(path => !keep.has(path) && !path.includes("/_build/"));
+    await store.deleteObjects(stale);
+    if (stale.length) log(`${region.id}: pruned ${stale.length.toLocaleString()} superseded R2 object(s).`);
   }
+  log(`${region.id}: direct R2 upload ${contentResult.files.toLocaleString()} immutable file(s), ${(contentResult.bytes / 1024 / 1024).toFixed(1)} MiB in ${Math.round((Date.now() - started) / 1000)}s.`);
 }
 
-function uploadRoot(remote, args) {
+async function uploadRoot(store, args) {
   // Routing artifacts are content-addressed, so copying them before the
-  // manifests flip keeps the remote consistent at every instant. Old files
-  // linger until a --prune run syncs them away.
-  if (existsSync(join(OUT, "text-routing"))) {
-    rclone(["copy", join(OUT, "text-routing"), `${remote}/text-routing`, "--size-only", "--transfers", "8"]);
+  // manifests flip keeps R2 consistent at every instant. Old files linger
+  // until a --prune run deletes them in S3 batches.
+  const routingDir = join(OUT, "text-routing");
+  let staleRouting = [];
+  if (existsSync(routingDir)) {
+    const files = listLocalFiles(routingDir);
+    await store.putFiles(files, "text-routing");
+    if (args?.prune) {
+      const keep = new Set(files.map(file => `text-routing/${file.relative}`));
+      staleRouting = (await store.listObjects("text-routing/"))
+        .map(object => object.path)
+        .filter(path => !keep.has(path));
+    }
   }
   for (const name of ["manifest.json", "manifest.min.json"]) {
-    rclone(["copyto", join(OUT, name), `${remote}/${name}`]);
+    await store.putFile(join(OUT, name), name);
   }
-  if (args?.prune && existsSync(join(OUT, "text-routing"))) {
-    rclone(["sync", join(OUT, "text-routing"), `${remote}/text-routing`, "--size-only", "--transfers", "8"]);
-  }
+  // Only retire routing objects after both stable root manifests have flipped.
+  await store.deleteObjects(staleRouting);
+  if (staleRouting.length) log(`Text routing: pruned ${staleRouting.length.toLocaleString()} superseded R2 object(s).`);
 }
 
 // --- text routing --------------------------------------------------------------
@@ -625,16 +634,17 @@ function writeRegionTermSet(region, state) {
 
 // Published-then-cleaned shards have no local term directory; pull just the
 // manifests + terms of the remote copy to regenerate the sidecar once.
-function backfillRegionTermSet(region, state, remote) {
+async function backfillRegionTermSet(region, state, store) {
   const tempDir = join(WORK, "term-backfill", region.id.replaceAll("/", "-"));
   rmSync(tempDir, { recursive: true, force: true });
   try {
-    rclone(["copy", `${remote}/shards/${region.id}`, tempDir,
-      "--include", "manifest*.json",
-      "--include", "terms/**",
-      "--include", "gen-*/manifest*.json",
-      "--include", "gen-*/terms/**",
-      "--transfers", "8"]);
+    const prefix = `shards/${region.id}/`;
+    await store.downloadPrefix(prefix, tempDir, relative => (
+      /^manifest[^/]*\.json$/u.test(relative)
+      || relative.startsWith("terms/")
+      || /^gen-[^/]+\/manifest[^/]*\.json$/u.test(relative)
+      || /^gen-[^/]+\/terms\//u.test(relative)
+    ));
     const started = Date.now();
     const written = rangefindShards.writeShardTermSet({ dir: tempDir, outFile: termSetPath(region) });
     const entry = state.regions[region.id];
@@ -650,19 +660,19 @@ function backfillRegionTermSet(region, state, remote) {
   }
 }
 
-function ensureRegionTermSet(region, state, remote) {
+async function ensureRegionTermSet(region, state, store) {
   const entry = state.regions[region.id];
   const fresh = entry.termSetFingerprint === entry.builtFingerprint && existsSync(termSetPath(region));
   if (fresh) return true;
   const localManifest = join(OUT, "shards", region.id, "manifest.min.json");
   if (!entry.cleaned && existsSync(localManifest) && writeRegionTermSet(region, state)) return true;
-  return remote ? backfillRegionTermSet(region, state, remote) : false;
+  return store ? backfillRegionTermSet(region, state, store) : false;
 }
 
 // Backfill existing published shards before new shard builds consume the
 // nightly window. Sidecars checkpoint independently, so an interrupted pass
 // resumes at the first missing shard on the next run.
-function prepareTextRoutingTermSets(built, state, remote, args, outOfTime, reserveMs) {
+async function prepareTextRoutingTermSets(built, state, store, args, outOfTime, reserveMs) {
   if (!args.textRouting) return true;
   if (typeof rangefindShards.writeShardTermSet !== "function") return false;
   for (const region of built) {
@@ -673,7 +683,7 @@ function prepareTextRoutingTermSets(built, state, remote, args, outOfTime, reser
       log("Text routing: deadline reserve reached — remaining term sets continue next run.");
       return false;
     }
-    if (!ensureRegionTermSet(region, state, remote)) return false;
+    if (!await ensureRegionTermSet(region, state, store)) return false;
   }
   return true;
 }
@@ -681,13 +691,13 @@ function prepareTextRoutingTermSets(built, state, remote, args, outOfTime, reser
 // Builds (or reuses) the root text-routing directory covering exactly the
 // published shard set. Any missing piece downgrades to null — the root then
 // ships without a text_routing block and clients fan out as before.
-async function buildTextRoutingArtifact(built, state, remote, args, outOfTime) {
+async function buildTextRoutingArtifact(built, state, store, args, outOfTime) {
   if (!args.textRouting) return null;
   if (typeof rangefindShards.writeTextRoutingIndex !== "function") {
     log("Text routing: installed rangefind lacks writeTextRoutingIndex — root stays fan-out.");
     return null;
   }
-  if (!prepareTextRoutingTermSets(built, state, remote, args, outOfTime, 10 * 60_000)) return null;
+  if (!await prepareTextRoutingTermSets(built, state, store, args, outOfTime, 10 * 60_000)) return null;
   const fingerprint = createHash("sha1")
     .update(JSON.stringify(built.map(region => [region.id, state.regions[region.id]?.builtFingerprint || ""])))
     .digest("hex");
@@ -798,29 +808,31 @@ function writeStatusArtifacts(regions, state) {
   writeFileSync(join(OUT, "status.json"), `${JSON.stringify(statusSnapshot(regions, state), null, 2)}\n`);
 }
 
-function publishStatusArtifacts(regions, state, remote, upload, includePage = false) {
+let statusUploadTail = Promise.resolve();
+
+function publishStatusArtifacts(regions, state, store, upload, includePage = false) {
   try {
     writeStatusArtifacts(regions, state);
     if (upload) {
       const names = includePage ? ["index.html", "status.json"] : ["status.json"];
-      for (const name of names) {
-        rclone(["copyto", join(OUT, name), `${remote}/${name}`]);
-      }
+      statusUploadTail = statusUploadTail
+        .then(async () => {
+          for (const name of names) await store.putFile(join(OUT, name), name);
+        })
+        .catch(error => log(`Status page upload failed — ${error.message}`));
     }
   } catch (error) {
     log(`Status page update failed — ${error.message}`);
   }
+  return statusUploadTail;
 }
 
 // The state records what was uploaded, but the remote is the truth: a wiped
-// bucket or a changed R2_REMOTE must not be trusted-through. One cheap
-// listing call per shard per run.
-function remoteHasShard(remote, region) {
+// bucket or changed R2 credentials must not be trusted-through. One cheap
+// HEAD call per shard per run.
+async function remoteHasShard(store, region) {
   try {
-    const out = execFileSync("rclone", ["lsf", `${remote}/shards/${region.id}/manifest.min.json`], {
-      stdio: ["ignore", "pipe", "ignore"]
-    });
-    return out.toString().trim().length > 0;
+    return await store.exists(`shards/${region.id}/manifest.min.json`);
   } catch {
     return false;
   }
@@ -892,9 +904,9 @@ async function cleanupRegion(region, state) {
   log(`${region.id}: cleaned local artifacts (kept compressed corpus, manifests, id-maps)`);
 }
 
-async function uploadAndCleanupShard(region, state, remote, args) {
+async function uploadAndCleanupShard(region, state, store, args) {
   const entry = state.regions[region.id];
-  await uploadShard(region, remote, args.prune && entry.localComplete === true);
+  await uploadShard(region, store, args.prune && entry.localComplete === true);
   entry.uploadedFingerprint = entry.builtFingerprint;
   saveState(state);
   log(`${region.id}: shard uploaded to R2.`);
@@ -941,8 +953,7 @@ async function main() {
     return;
   }
 
-  const remote = process.env.R2_REMOTE || "";
-  if (args.upload && !remote) throw new Error("Set R2_REMOTE (e.g. r2:osm-index) or pass --no-upload.");
+  const store = args.upload ? createR2Store() : null;
   acquireLock();
   const stopAt = deadlineMs(args);
   const remaining = () => stopAt - Date.now();
@@ -958,7 +969,7 @@ async function main() {
     error: null
   };
   saveState(state);
-  publishStatusArtifacts(allRegions, state, remote, args.upload, true);
+  publishStatusArtifacts(allRegions, state, store, args.upload, true);
   const updateProgress = (stage, region = null, completed = 0, total = regions.length, extra = {}) => {
     state.run.progress = {
       stage,
@@ -969,21 +980,25 @@ async function main() {
       updatedAt: new Date().toISOString()
     };
     saveState(state);
-    publishStatusArtifacts(allRegions, state, remote, args.upload);
+    publishStatusArtifacts(allRegions, state, store, args.upload);
   };
   const configuredUploadQueueDepth = Number(process.env.R2_UPLOAD_QUEUE_DEPTH || 2);
   const uploadQueueDepth = Number.isInteger(configuredUploadQueueDepth) && configuredUploadQueueDepth > 0
     ? Math.min(configuredUploadQueueDepth, 8)
     : 2;
+  const configuredUploadLanes = Number(process.env.R2_UPLOAD_LANES || 2);
+  const uploadLanes = Number.isInteger(configuredUploadLanes) && configuredUploadLanes > 0
+    ? Math.min(configuredUploadLanes, uploadQueueDepth)
+    : Math.min(2, uploadQueueDepth);
   const uploadQueue = args.upload
-    ? createSerialTaskQueue({ maxPending: uploadQueueDepth })
+    ? createTaskQueue({ maxPending: uploadQueueDepth, concurrency: uploadLanes })
     : null;
   const queueShardUpload = async region => {
     await uploadQueue.enqueue(async () => {
       log(`${region.id}: background upload started.`);
       try {
-        await uploadAndCleanupShard(region, state, remote, args);
-        publishStatusArtifacts(allRegions, state, remote, true);
+        await uploadAndCleanupShard(region, state, store, args);
+        publishStatusArtifacts(allRegions, state, store, true);
       } catch (error) {
         log(`${region.id}: background upload failed — ${error.message}`);
         throw error;
@@ -992,7 +1007,7 @@ async function main() {
     log(`${region.id}: queued for background upload (${uploadQueue.pending}/${uploadQueue.capacity} pending).`);
   };
   if (uploadQueue) {
-    log(`Background uploads: one rclone lane, up to ${uploadQueue.capacity} shard(s) pending while the next shard builds.`);
+    log(`Direct R2 uploads: ${uploadQueue.concurrency} shard lane(s), up to ${uploadQueue.capacity} shard(s) pending, ${process.env.R2_REQUEST_CONCURRENCY || 16} total S3 requests.`);
   }
   let runError = null;
 
@@ -1097,10 +1112,10 @@ async function main() {
     && typeof rangefindShards.writeTextRoutingIndex === "function";
   if (textRoutingAvailable && builtBeforeBuild.length) {
     updateProgress("routing", null, 0, builtBeforeBuild.length);
-    prepareTextRoutingTermSets(
+    await prepareTextRoutingTermSets(
       builtBeforeBuild,
       state,
-      args.upload ? remote : null,
+      store,
       args,
       outOfTime,
       30 * 60_000
@@ -1181,7 +1196,7 @@ async function main() {
     return;
   }
   const stats = loadScoringStats(statsPath());
-  const textRouting = await buildTextRoutingArtifact(built, state, args.upload ? remote : null, args, outOfTime);
+  const textRouting = await buildTextRoutingArtifact(built, state, store, args, outOfTime);
   const rootManifest = writeShardedRootManifest({
     outDir: OUT,
     shards: built.map(region => ({
@@ -1206,7 +1221,7 @@ async function main() {
   log(`Root manifest: ${rootManifest.shards.length} shard(s), ${rootManifest.total.toLocaleString()} docs.`);
 
   if (args.upload) {
-    // Builds run ahead of the bounded serial queue. Drain it before checking
+    // Builds run ahead of the bounded multi-lane queue. Drain it before checking
     // remote completeness and atomically publishing the new root manifest.
     await uploadQueue.drain();
     for (const [regionIndex, region] of built.entries()) {
@@ -1217,7 +1232,7 @@ async function main() {
       updateProgress("publishing", region, regionIndex, built.length);
       const entry = state.regions[region.id];
       if (entry.uploadedFingerprint === entry.builtFingerprint) {
-        if (remoteHasShard(remote, region)) {
+        if (await remoteHasShard(store, region)) {
           // Already published; reclaim disk if a previous run kept artifacts.
           if (!args.keepArtifacts && !entry.cleaned) await cleanupRegion(region, state);
           continue;
@@ -1234,9 +1249,9 @@ async function main() {
         }
         log(`${region.id}: shard missing on remote — re-uploading from local copy.`);
       }
-      // Prune requires a complete local mirror (fresh full rebuild): a
-      // sync-with-delete from a partial local copy would delete live packs.
-      await uploadAndCleanupShard(region, state, remote, args);
+      // Prune requires a complete local mirror (fresh full rebuild): deleting
+      // remote extras from a partial local copy would delete live packs.
+      await uploadAndCleanupShard(region, state, store, args);
     }
     const allUploaded = built.every(region => {
       const entry = state.regions[region.id];
@@ -1244,7 +1259,7 @@ async function main() {
     });
     if (allUploaded) {
       updateProgress("publishing", null, built.length, built.length);
-      uploadRoot(remote, args);
+      await uploadRoot(store, args);
       state.rootPublishedAt = new Date().toISOString();
       state.publishedRoot = {
         shards: rootManifest.shards.length,
@@ -1272,7 +1287,8 @@ async function main() {
     };
     if (!runError) state.lastSuccessfulRunAt = completedAt;
     saveState(state);
-    publishStatusArtifacts(allRegions, state, remote, args.upload);
+    await publishStatusArtifacts(allRegions, state, store, args.upload);
+    store?.close();
   }
 }
 

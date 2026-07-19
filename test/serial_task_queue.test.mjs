@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createSerialTaskQueue } from "../scripts/lib/serial_task_queue.mjs";
+import { createSerialTaskQueue, createTaskQueue } from "../scripts/lib/serial_task_queue.mjs";
 
 function deferred() {
   let resolve;
@@ -66,4 +66,33 @@ test("surfaces the first background failure and skips queued work", async () => 
   await assert.rejects(queue.drain(), /upload failed/u);
   assert.equal(secondRan, false);
   await assert.rejects(queue.enqueue(async () => {}), /upload failed/u);
+});
+
+test("runs bounded tasks concurrently", async () => {
+  const queue = createTaskQueue({ maxPending: 4, concurrency: 2 });
+  const first = deferred();
+  const second = deferred();
+  const thirdStarted = deferred();
+  const events = [];
+  await queue.enqueue(async () => {
+    events.push("first:start");
+    await first.promise;
+    events.push("first:end");
+  });
+  await queue.enqueue(async () => {
+    events.push("second:start");
+    await second.promise;
+    events.push("second:end");
+  });
+  await queue.enqueue(async () => {
+    events.push("third");
+    thirdStarted.resolve();
+  });
+  await Promise.resolve();
+  assert.deepEqual(events, ["first:start", "second:start"]);
+  first.resolve();
+  await thirdStarted.promise;
+  assert.equal(events.includes("third"), true);
+  second.resolve();
+  await queue.drain();
 });

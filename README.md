@@ -9,21 +9,21 @@ weekends.
 Every run makes as much progress as fits before its deadline and stops
 cleanly; interrupted shard builds resume from rangefind's stage checkpoints
 on the next run. Only regions whose upstream OSM data changed are
-re-downloaded, re-extracted, rebuilt, and re-uploaded (packs are
-content-addressed, so `rclone` skips unchanged objects).
+re-downloaded, re-extracted, rebuilt, and re-uploaded. Immutable packs are
+content-addressed and published directly through Cloudflare's S3 API.
 
 ## Setup
 
 ```sh
 npm install                       # rangefind ^0.3.0 from npm
-cp .env.example .env              # fill in R2 credentials / remote
+cp .env.example .env              # fill in direct R2/S3 credentials
 chmod +x scripts/nightly.sh
 # edit regions.json — one entry per shard (Geofabrik path)
 ```
 
-Requires: Node ≥ 22, `rclone` on PATH, disk ≈ the largest single region's
-PBF + corpus + built shard (steady state is far smaller — see Disk usage)
-(PBFs + JSONL + build temp + index).
+Requires: Node ≥ 22 and disk ≈ the largest single region's PBF + corpus +
+built shard (steady state is far smaller — see Disk usage) (PBFs + JSONL +
+build temp + index). No external object-storage CLI is required.
 
 ## The shard set
 
@@ -51,9 +51,10 @@ would change the region set, regenerate the stats artifact, and invalidate
 every shard already built (`--partial` overrides the gate deliberately).
 Once acquisition completes, one stats pass runs, then shards build and
 publish region by region — every step deadline-aware and resumable. Each
-completed shard enters a serial background rclone queue, so its upload and
-cleanup overlap the next shard build. The queue holds at most two completed
-shards by default (`R2_UPLOAD_QUEUE_DEPTH`) to bound temporary disk use. While
+completed shard enters a bounded multi-lane R2 queue, so batched object PUTs
+and cleanup overlap the next shard build. Two shard uploads run concurrently
+by default (`R2_UPLOAD_LANES`) through one shared 16-request S3 pool
+(`R2_REQUEST_CONCURRENCY`); `R2_UPLOAD_QUEUE_DEPTH` bounds temporary disk. While
 the initial root manifest is incomplete, later runs reuse those acquired
 snapshots and resume building before checking Geofabrik again. Daily upstream
 refreshes start only after every initial shard has been published, so fresh
@@ -64,8 +65,8 @@ configuration), so downloads and normal-sized extracts can overlap. A PBF at
 or above `largePbfBytes` (default 1 GiB) consumes every lane and extracts
 alone to protect memory on the 31 GiB production host. Stats and shard builds
 remain sequential; each shard build already uses the configured CPU worker
-pool. One rclone lane runs beside them, preserving packs-before-manifests
-ordering for every shard.
+pool. Direct R2 uploads preserve packs-before-generation-manifests-before-root-
+manifest ordering for every shard.
 
 Rough planet budget on a modern 12–16-core box: ~78 GiB of downloads
 (bandwidth-bound), a few hours of extraction, several hours for the stats
@@ -114,7 +115,7 @@ default; `INDEX_LOG_FILE` selects a different file as shown above.
 | JSONL extract | PBF version changed | skipped |
 | scoring stats | region set changed, corpus drift > `statsDriftRatio` (default 10%), or `--force-stats` | none |
 | shard update | corpus or stats changed | none |
-| upload | built fingerprint ≠ uploaded fingerprint | rclone size-check against the remote listing |
+| upload | built fingerprint ≠ uploaded fingerprint | none |
 
 **Changed regions ship as generational deltas, not full rebuilds.** The
 fresh corpus is diffed against the snapshot the shard was built from; the
@@ -133,8 +134,9 @@ between regenerations, updated regions stay exactly comparable with
 untouched shards. Drift only shifts idf slightly, and 10% corpus growth is
 years of OSM edits for most regions.
 
-Publish ordering is reader-safe: shard packs upload before shard manifests,
-and the root manifest uploads only after every built shard is fully synced.
+Publish ordering is reader-safe: shard packs upload before generation
+manifests, stable shard manifests publish last, and the root manifest uploads
+only after every built shard is fully durable.
 Old packs are left in place until a `--prune` run so in-flight readers on the
 previous manifest never 404 (prune runs only on freshly rebuilt shards whose
 local mirror is complete).
@@ -150,17 +152,18 @@ run only establishes the grace-period baseline, and every run writes
 
 ## Disk usage
 
-Nothing is ever downloaded back from R2. After each region publishes, local
-artifacts are reclaimed automatically (disable with `--keep-artifacts`):
+Only selective manifest/term data is downloaded for a missing routing
+sidecar. After each region publishes, local artifacts are reclaimed
+automatically (disable with `--keep-artifacts`):
 the PBF and extractor caches are deleted, the corpus JSONL is compressed
 (it is the next diff base and the stats-regeneration input), and the local
 index copy is gutted to manifests + generation id-maps (what future deltas
 need). Steady state per region ≈ the gzipped corpus — e.g. Luxembourg
 ~17 MB on disk vs a 186 MB published index. Transient acquisition is bounded
 by `acquisitionConcurrency` normal regions or one large region. Shards still
-build one at a time, while up to `R2_UPLOAD_QUEUE_DEPTH` completed shards can
-await upload/cleanup. Size disk for the largest active build plus that bounded
-queue rather than the full corpus.
+build one at a time, while `R2_UPLOAD_LANES` shard uploads run concurrently
+and up to `R2_UPLOAD_QUEUE_DEPTH` completed shards can await cleanup. Size disk
+for the largest active build plus that bounded queue rather than the full corpus.
 
 ## Serving
 
