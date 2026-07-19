@@ -97,10 +97,15 @@ async function loadProtections(remote) {
   };
 }
 
-async function listObjects(remote) {
+async function listObjectsAt(remote, prefix, maxDepth = null) {
+  const target = prefix ? `${remote}/${prefix.replace(/\/$/u, "")}` : remote;
+  const argv = [
+    "lsf", target, "--files-only", "--format", "pst", "--separator", "\t"
+  ];
+  if (maxDepth) argv.push("--max-depth", String(maxDepth));
+  else argv.push("--recursive", "--fast-list");
   const child = spawn("rclone", [
-    "lsf", remote, "--recursive", "--files-only", "--fast-list",
-    "--format", "pst", "--separator", "\t"
+    ...argv
   ], { stdio: ["ignore", "pipe", "inherit"] });
   const exit = new Promise((resolveExit, rejectExit) => {
     child.once("error", rejectExit);
@@ -111,11 +116,35 @@ async function listObjects(remote) {
   for await (const line of lines) {
     const [path, sizeText, modTime] = line.split("\t");
     const size = Number(sizeText);
-    if (path && Number.isFinite(size)) objects.push({ path, size, modTime });
+    if (path && Number.isFinite(size)) {
+      objects.push({ path: prefix ? posix.join(prefix, path) : path, size, modTime });
+    }
   }
   const code = await exit;
   if (code !== 0) throw new Error(`rclone lsf exited with code ${code}`);
   return objects;
+}
+
+async function listDirectories(remote, prefix = "") {
+  const target = prefix ? `${remote}/${prefix.replace(/\/$/u, "")}` : remote;
+  const { stdout } = await execFileAsync("rclone", [
+    "lsf", target, "--dirs-only", "--max-depth", "1"
+  ], { maxBuffer: 20 * 1024 * 1024 });
+  return stdout.split("\n").map(value => value.trim()).filter(Boolean);
+}
+
+async function listObjects(remote) {
+  const topLevel = await listDirectories(remote);
+  const shardDirectory = topLevel.find(path => path.replace(/\/$/u, "") === "shards");
+  const shardPrefixes = shardDirectory
+    ? (await listDirectories(remote, "shards")).map(path => posix.join("shards", path))
+    : [];
+  const otherPrefixes = topLevel
+    .filter(path => path !== shardDirectory)
+    .map(path => path.replace(/\/$/u, ""));
+  const rootObjects = await listObjectsAt(remote, "", 1);
+  const batches = await parallelMap([...shardPrefixes, ...otherPrefixes], 8, prefix => listObjectsAt(remote, prefix));
+  return [...rootObjects, ...batches.flat()];
 }
 
 function formatBytes(bytes) {
