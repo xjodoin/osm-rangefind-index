@@ -50,7 +50,6 @@
 import { fork, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { createInterface } from "node:readline";
 import { dirname, join, resolve } from "node:path";
 import { availableParallelism, hostname } from "node:os";
 import { pipeline } from "node:stream/promises";
@@ -74,6 +73,7 @@ const OUT = join(WORK, "public/rangefind");
 const STATE_PATH = join(WORK, "state.json");
 const LOCK_PATH = join(WORK, ".lock");
 const STATS_DIR = join(WORK, "scoring-stats");
+const CORPUS_DELTA_WORKER = join(projectRoot, "scripts/compute_delta_worker.mjs");
 
 function parseArgs(argv) {
   const args = {
@@ -355,52 +355,21 @@ async function extractJsonl(region, state) {
   return true;
 }
 
-// --- corpus diff ---------------------------------------------------------------
-
-function lineDocId(line) {
-  const match = line.match(/"id":"([^"]*)"/u);
-  return match ? match[1] : "";
-}
-
-async function eachLineOf(stream, fn) {
-  const rl = createInterface({ input: stream, crlfDelay: Infinity });
-  for await (const line of rl) {
-    if (line) fn(line);
-  }
-}
-
 // Diffs the fresh extraction against the snapshot the shard was built from.
 // Added and changed documents become the delta corpus; deleted ids are only
 // counted — generational deltas cannot remove documents, so deletions
 // accumulate in state until they force a full rebuild.
-// Memory: one hash entry per snapshot doc (~100B) — ~600MB for a 6M-doc
-// region; oversized regions fall back to full rebuilds via maxDeltaRatio.
+// The hash map lives in an isolated high-heap child: large regions need
+// several GiB, but the long-running orchestrator returns to baseline after
+// every comparison instead of retaining that expanded V8 heap.
 async function computeDelta(region) {
-  const old = new Map();
-  await eachLineOf(createReadStream(regionJsonlGz(region)).pipe(createGunzip()), line => {
-    old.set(lineDocId(line), createHash("sha1").update(line).digest("base64"));
-  });
   const deltaPath = join(regionWorkRoot(region), "data/delta.jsonl");
-  const writer = createWriteStream(`${deltaPath}.tmp`);
-  let added = 0;
-  let changed = 0;
-  let fresh = 0;
-  await eachLineOf(createReadStream(regionJsonl(region)), line => {
-    fresh++;
-    const id = lineDocId(line);
-    const known = old.get(id);
-    if (known !== undefined) {
-      old.delete(id);
-      if (known === createHash("sha1").update(line).digest("base64")) return;
-      changed++;
-    } else {
-      added++;
-    }
-    writer.write(line + "\n");
-  });
-  await new Promise(resolveEnd => writer.end(resolveEnd));
-  renameSync(`${deltaPath}.tmp`, deltaPath);
-  return { deltaPath, added, changed, deleted: old.size, fresh };
+  const heapMb = Math.max(4096, Math.min(24576, Number(process.env.CORPUS_DIFF_HEAP_MB || 16384) || 16384));
+  return runIpcWorker(
+    CORPUS_DELTA_WORKER,
+    [regionJsonlGz(region), regionJsonl(region), deltaPath],
+    heapMb
+  );
 }
 
 // --- step 3: scoring stats ---------------------------------------------------
@@ -614,10 +583,10 @@ function termSetPath(region) {
   return join(TERM_SETS_DIR, `${region.id.replaceAll("/", "-")}.terms.gz`);
 }
 
-function runTextRoutingWorker(args, heapMb = 4096) {
+function runIpcWorker(worker, args, heapMb) {
   return new Promise((resolveDone, rejectDone) => {
     let result;
-    const child = fork(TEXT_ROUTING_WORKER, args, {
+    const child = fork(worker, args, {
       execArgv: [`--max-old-space-size=${heapMb}`],
       stdio: ["ignore", "inherit", "inherit", "ipc"]
     });
@@ -630,6 +599,10 @@ function runTextRoutingWorker(args, heapMb = 4096) {
       else rejectDone(new Error(`text routing worker failed (${signal || `exit ${code}`})`));
     });
   });
+}
+
+function runTextRoutingWorker(args, heapMb = 4096) {
+  return runIpcWorker(TEXT_ROUTING_WORKER, args, heapMb);
 }
 
 async function writeRegionTermSet(region, state) {
