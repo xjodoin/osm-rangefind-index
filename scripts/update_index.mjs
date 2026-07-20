@@ -74,6 +74,10 @@ const STATE_PATH = join(WORK, "state.json");
 const LOCK_PATH = join(WORK, ".lock");
 const STATS_DIR = join(WORK, "scoring-stats");
 const CORPUS_DELTA_WORKER = join(projectRoot, "scripts/compute_delta_worker.mjs");
+// Rangefind 0.3.6 locality enrichment changed normalized OSM documents.
+// Keep this in the orchestrator identity so a package upgrade cannot reuse a
+// corpus produced by an older extractor before extractOsmPlaces sees it.
+const OSM_EXTRACTION_SCHEMA_VERSION = 9;
 
 function parseArgs(argv) {
   const args = {
@@ -307,7 +311,9 @@ async function refreshPbf(region, state) {
   // upstream changed, or when extraction still needs it (stale/lost
   // extraction state) and the file is gone.
   const current = lastModified && lastModified === entry.pbfLastModified;
-  const extractionCurrent = entry.extractIdentity === lastModified && hasCorpus(region);
+  const extractionCurrent = entry.extractIdentity === lastModified
+    && entry.extractSchema === OSM_EXTRACTION_SCHEMA_VERSION
+    && hasCorpus(region);
   if (current && (existsSync(region.pbf) || extractionCurrent)) return { bytes: bytes || entry.pbfBytes || 0 };
 
   log(`${region.id}: downloading ${url} (${lastModified || "unknown date"})`);
@@ -338,7 +344,9 @@ async function refreshPbf(region, state) {
 async function extractJsonl(region, state) {
   const entry = state.regions[region.id] || (state.regions[region.id] = {});
   const identity = pbfIdentity(region, state);
-  if (entry.extractIdentity === identity && hasCorpus(region)) return false;
+  if (entry.extractIdentity === identity
+    && entry.extractSchema === OSM_EXTRACTION_SCHEMA_VERSION
+    && hasCorpus(region)) return false;
   if (!existsSync(region.pbf)) {
     throw new Error(`${region.id}: corpus is stale but the PBF is missing (refresh failed?)`);
   }
@@ -351,8 +359,12 @@ async function extractJsonl(region, state) {
     root: regionWorkRoot(region),
     rqa: false
   });
+  if (Number(meta.schemaVersion) !== OSM_EXTRACTION_SCHEMA_VERSION) {
+    throw new Error(`${region.id}: Rangefind OSM extraction schema ${meta.schemaVersion || "unknown"}; expected ${OSM_EXTRACTION_SCHEMA_VERSION}`);
+  }
   entry.docs = Number(meta.docs || 0);
   entry.extractIdentity = identity;
+  entry.extractSchema = OSM_EXTRACTION_SCHEMA_VERSION;
   entry.overrides = region.overrides || null;
   return true;
 }
@@ -449,7 +461,7 @@ function statsFingerprint() {
 // local artifacts never triggers a rebuild.
 function shardFingerprint(region, state) {
   const entry = state.regions[region.id] || {};
-  return `${entry.extractIdentity || "?"}:${entry.docs || 0}:${statsFingerprint()}:${JSON.stringify(region.overrides || null)}`;
+  return `${entry.extractIdentity || "?"}:${entry.extractSchema || 0}:${entry.docs || 0}:${statsFingerprint()}:${JSON.stringify(region.overrides || null)}`;
 }
 
 function shardDir(region) {
