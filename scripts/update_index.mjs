@@ -1247,9 +1247,13 @@ async function main() {
               // the acquisition footprint near the gzipped corpus total
               // instead of hundreds of GB of PBFs + plain JSONL.
               await compressJsonl(region);
-              if (!region.pinned) rmSync(region.pbf, { force: true });
             }
           }
+          // The completed corpus is the only downstream build input. Keeping
+          // all ~79 GiB of downloaded PBFs until 310 shards publish can exhaust
+          // the planet-build disk while fresh JSONL and old gz snapshots
+          // coexist, so reclaim each non-pinned source immediately.
+          if (!region.pinned) rmSync(region.pbf, { force: true });
           cleanupExtractionScratch(region);
           saveState(state);
         } catch (error) {
