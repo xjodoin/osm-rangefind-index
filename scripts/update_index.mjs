@@ -86,7 +86,8 @@ function parseArgs(argv) {
     status: false,
     keepArtifacts: false,
     partial: false,
-    textRouting: true
+    textRouting: true,
+    suggestRouting: true
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -100,6 +101,7 @@ function parseArgs(argv) {
     else if (arg === "--keep-artifacts") args.keepArtifacts = true;
     else if (arg === "--partial") args.partial = true;
     else if (arg === "--no-text-routing") args.textRouting = false;
+    else if (arg === "--no-suggest-routing") args.suggestRouting = false;
     else throw new Error(`Unknown argument: ${arg}`);
   }
   return args;
@@ -551,24 +553,25 @@ async function uploadRoot(store, args) {
   // Routing artifacts are content-addressed, so copying them before the
   // manifests flip keeps R2 consistent at every instant. Old files linger
   // until a --prune run deletes them in S3 batches.
-  const routingDir = join(OUT, "text-routing");
-  let staleRouting = [];
-  if (existsSync(routingDir)) {
-    const files = listLocalFiles(routingDir);
-    await store.putFiles(files, "text-routing");
+  const staleByPrefix = [];
+  for (const prefix of ["text-routing", "authority"]) {
+    const dir = join(OUT, prefix);
+    if (!existsSync(dir)) continue;
+    const files = listLocalFiles(dir);
+    await store.putFiles(files, prefix);
     if (args?.prune) {
-      const keep = new Set(files.map(file => `text-routing/${file.relative}`));
-      staleRouting = (await store.listObjects("text-routing/"))
+      const keep = new Set(files.map(file => `${prefix}/${file.relative}`));
+      staleByPrefix.push(...(await store.listObjects(`${prefix}/`))
         .map(object => object.path)
-        .filter(path => !keep.has(path));
+        .filter(path => !keep.has(path)));
     }
   }
   for (const name of ["manifest.json", "manifest.min.json"]) {
     await store.putFile(join(OUT, name), name);
   }
   // Only retire routing objects after both stable root manifests have flipped.
-  await store.deleteObjects(staleRouting);
-  if (staleRouting.length) log(`Text routing: pruned ${staleRouting.length.toLocaleString()} superseded R2 object(s).`);
+  await store.deleteObjects(staleByPrefix);
+  if (staleByPrefix.length) log(`Routing artifacts: pruned ${staleByPrefix.length.toLocaleString()} superseded R2 object(s).`);
 }
 
 // --- text routing --------------------------------------------------------------
@@ -577,10 +580,16 @@ async function uploadRoot(store, args) {
 // files instead of re-reading (possibly reclaimed) shard term directories.
 const TERM_SETS_DIR = join(WORK, "term-sets");
 const TEXT_ROUTING_BLOCK_PATH = join(WORK, "text-routing-block.json");
+const SUGGEST_SETS_DIR = join(WORK, "suggest-sets");
+const SUGGEST_ROUTING_BLOCK_PATH = join(WORK, "suggest-routing-block.json");
 const TEXT_ROUTING_WORKER = join(projectRoot, "scripts/text_routing_worker.mjs");
 
 function termSetPath(region) {
   return join(TERM_SETS_DIR, `${region.id.replaceAll("/", "-")}.terms.gz`);
+}
+
+function suggestSetPath(region) {
+  return join(SUGGEST_SETS_DIR, `${region.id.replaceAll("/", "-")}.suggest.gz`);
 }
 
 function runIpcWorker(worker, args, heapMb) {
@@ -719,6 +728,127 @@ async function buildTextRoutingArtifact(built, state, store, args, outOfTime) {
     return block;
   } catch (error) {
     log(`Text routing build failed (root stays fan-out): ${error.message}`);
+    return null;
+  }
+}
+
+// --- suggest routing -----------------------------------------------------------
+
+// Suggest-set sidecars mirror term sets: each shard's authority autocomplete
+// lexicon survives local cleanup as a small gzipped JSONL file, so the root
+// suggest artifact merges sidecars instead of whole shards.
+async function writeRegionSuggestSet(region, state) {
+  if (typeof rangefindShards.writeShardSuggestSet !== "function") return false;
+  const entry = state.regions[region.id];
+  try {
+    const started = Date.now();
+    const written = await runTextRoutingWorker([
+      "suggest-set",
+      join(OUT, "shards", region.id),
+      suggestSetPath(region)
+    ]);
+    entry.suggestSetFingerprint = entry.builtFingerprint;
+    saveState(state);
+    log(`${region.id}: suggest set written (${written.keys.toLocaleString()} keys, ${Math.round((Date.now() - started) / 1000)}s).`);
+    return true;
+  } catch (error) {
+    log(`${region.id}: suggest set failed (${error.message}) — suggest routing skipped until it succeeds.`);
+    return false;
+  }
+}
+
+// Published-then-cleaned shards have no local authority sidecar; pull just
+// the manifests + authority files of the remote copy to regenerate it once.
+async function backfillRegionSuggestSet(region, state, store) {
+  const tempDir = join(WORK, "suggest-backfill", region.id.replaceAll("/", "-"));
+  rmSync(tempDir, { recursive: true, force: true });
+  try {
+    const prefix = `shards/${region.id}/`;
+    await store.downloadPrefix(prefix, tempDir, relative => (
+      /^manifest[^/]*\.json$/u.test(relative)
+      || relative.startsWith("authority/")
+      || /^gen-[^/]+\/manifest[^/]*\.json$/u.test(relative)
+      || /^gen-[^/]+\/authority\//u.test(relative)
+    ));
+    const started = Date.now();
+    const written = await runTextRoutingWorker(["suggest-set", tempDir, suggestSetPath(region)]);
+    const entry = state.regions[region.id];
+    entry.suggestSetFingerprint = entry.uploadedFingerprint || entry.builtFingerprint;
+    saveState(state);
+    log(`${region.id}: suggest set backfilled from remote (${written.keys.toLocaleString()} keys, ${Math.round((Date.now() - started) / 1000)}s).`);
+    return true;
+  } catch (error) {
+    log(`${region.id}: suggest set backfill failed (${error.message}).`);
+    return false;
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function ensureRegionSuggestSet(region, state, store) {
+  const entry = state.regions[region.id];
+  const fresh = entry.suggestSetFingerprint === entry.builtFingerprint && existsSync(suggestSetPath(region));
+  if (fresh) return true;
+  const localManifest = join(OUT, "shards", region.id, "manifest.min.json");
+  if (!entry.cleaned && existsSync(localManifest) && await writeRegionSuggestSet(region, state)) return true;
+  return store ? backfillRegionSuggestSet(region, state, store) : false;
+}
+
+async function prepareSuggestSets(built, state, store, args, outOfTime, reserveMs) {
+  if (!args.suggestRouting) return true;
+  if (typeof rangefindShards.writeShardSuggestSet !== "function") return false;
+  for (const region of built) {
+    const entry = state.regions[region.id];
+    const fresh = entry.suggestSetFingerprint === entry.builtFingerprint && existsSync(suggestSetPath(region));
+    if (fresh) continue;
+    if (outOfTime(reserveMs)) {
+      log("Suggest routing: deadline reserve reached — remaining suggest sets continue next run.");
+      return false;
+    }
+    if (!await ensureRegionSuggestSet(region, state, store)) return false;
+  }
+  return true;
+}
+
+// Builds (or reuses) the root suggest artifact (merged authority lexicon at
+// <root>/authority/) covering exactly the published shard set. Any missing
+// piece downgrades to null — the root then ships without a suggest_routing
+// block and clients fan out per keystroke as before.
+async function buildSuggestRoutingArtifact(built, state, store, args, outOfTime) {
+  if (!args.suggestRouting) return null;
+  if (typeof rangefindShards.writeSuggestRoutingIndex !== "function") {
+    log("Suggest routing: installed rangefind lacks writeSuggestRoutingIndex — suggest stays fan-out.");
+    return null;
+  }
+  if (!await prepareSuggestSets(built, state, store, args, outOfTime, 10 * 60_000)) return null;
+  const fingerprint = createHash("sha1")
+    .update(JSON.stringify(built.map(region => [region.id, state.regions[region.id]?.builtFingerprint || ""])))
+    .digest("hex");
+  const existing = loadJson(SUGGEST_ROUTING_BLOCK_PATH, null);
+  if (state.suggestRoutingFingerprint === fingerprint && existing && existsSync(join(OUT, "authority"))) {
+    return existing;
+  }
+  if (outOfTime(10 * 60_000)) {
+    log("Suggest routing: deadline near — merge deferred to next run, suggest stays fan-out.");
+    return null;
+  }
+  try {
+    const started = Date.now();
+    rmSync(join(OUT, "authority"), { recursive: true, force: true });
+    const workerConfig = join(WORK, "suggest-routing-worker.json");
+    writeFileSync(workerConfig, JSON.stringify({
+      outDir: OUT,
+      shards: built.map(region => ({ id: region.id, suggestSet: suggestSetPath(region) }))
+    }));
+    const heapMb = Math.max(4096, Math.min(24576, Number(process.env.SUGGEST_ROUTING_HEAP_MB || 12288) || 12288));
+    const block = await runTextRoutingWorker(["suggest-routing", workerConfig], heapMb);
+    writeFileSync(SUGGEST_ROUTING_BLOCK_PATH, JSON.stringify(block));
+    state.suggestRoutingFingerprint = fingerprint;
+    saveState(state);
+    log(`Suggest routing: ${block.keys.toLocaleString()} lexicon keys over ${built.length} shard(s) in ${Math.round((Date.now() - started) / 1000)}s.`);
+    return block;
+  } catch (error) {
+    log(`Suggest routing build failed (suggest stays fan-out): ${error.message}`);
     return null;
   }
 }
@@ -943,6 +1073,11 @@ async function uploadAndCleanupShard(region, state, store, args) {
   if (args.textRouting && !termSetFresh) {
     await backfillRegionTermSet(region, state, store);
   }
+  const suggestSetFresh = entry.suggestSetFingerprint === entry.builtFingerprint
+    && existsSync(suggestSetPath(region));
+  if (args.suggestRouting && !suggestSetFresh && typeof rangefindShards.writeShardSuggestSet === "function") {
+    await backfillRegionSuggestSet(region, state, store);
+  }
   if (!args.keepArtifacts) {
     await cleanupRegion(region, state);
     saveState(state);
@@ -1143,9 +1278,23 @@ async function main() {
   const textRoutingAvailable = args.textRouting
     && typeof rangefindShards.writeShardTermSet === "function"
     && typeof rangefindShards.writeTextRoutingIndex === "function";
+  const suggestRoutingAvailable = args.suggestRouting
+    && typeof rangefindShards.writeShardSuggestSet === "function"
+    && typeof rangefindShards.writeSuggestRoutingIndex === "function";
   if (textRoutingAvailable && builtBeforeBuild.length) {
     updateProgress("routing", null, 0, builtBeforeBuild.length);
     await prepareTextRoutingTermSets(
+      builtBeforeBuild,
+      state,
+      store,
+      args,
+      outOfTime,
+      30 * 60_000
+    );
+  }
+  if (suggestRoutingAvailable && builtBeforeBuild.length) {
+    updateProgress("routing", null, 0, builtBeforeBuild.length);
+    await prepareSuggestSets(
       builtBeforeBuild,
       state,
       store,
@@ -1214,6 +1363,9 @@ async function main() {
       if (args.textRouting && (!plan.update || !args.upload)) {
         await writeRegionTermSet(region, state);
       }
+      if (args.suggestRouting && (!plan.update || !args.upload) && typeof rangefindShards.writeShardSuggestSet === "function") {
+        await writeRegionSuggestSet(region, state);
+      }
       if (args.upload && !outOfTime(2 * 60_000)) {
         await queueShardUpload(region);
       } else if (args.upload) {
@@ -1235,6 +1387,7 @@ async function main() {
   }
   const stats = loadScoringStats(statsPath());
   const textRouting = await buildTextRoutingArtifact(built, state, store, args, outOfTime);
+  const suggestRouting = await buildSuggestRoutingArtifact(built, state, store, args, outOfTime);
   const rootManifest = writeShardedRootManifest({
     outDir: OUT,
     shards: built.map(region => ({
@@ -1245,6 +1398,7 @@ async function main() {
     })),
     scoringStats: stats,
     textRouting,
+    suggestRouting,
     extra: {
       // Root-level provenance: the OSM attribution block without any
       // region-specific fields; per-shard manifests carry source URLs and

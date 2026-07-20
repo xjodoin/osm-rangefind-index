@@ -16,8 +16,13 @@ try {
   } else if (mode === "routing" && first) {
     const config = JSON.parse(readFileSync(first, "utf-8"));
     value = await rangefindShards.writeTextRoutingIndex(config);
+  } else if (mode === "suggest-set" && first && second) {
+    value = rangefindShards.writeShardSuggestSet({ dir: first, outFile: second });
+  } else if (mode === "suggest-routing" && first) {
+    const config = JSON.parse(readFileSync(first, "utf-8"));
+    value = await rangefindShards.writeSuggestRoutingIndex(config);
   } else {
-    throw new Error("usage: text_routing_worker.mjs term-set <shard-dir> <output> | routing <config.json>");
+    throw new Error("usage: text_routing_worker.mjs term-set <shard-dir> <output> | routing <config.json> | suggest-set <shard-dir> <output> | suggest-routing <config.json>");
   }
   if (process.send) {
     process.send({ type: "result", value }, () => process.disconnect());
