@@ -11,32 +11,21 @@
 // fingerprint (or manifest identity), so steady-state runs only refetch
 // shards that actually rebuilt.
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { pathToFileURL } from "node:url";
-import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { createNodeSearch } from "rangefind/node";
-
-const projectRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 export const DEFAULT_PUBLIC_BASE_URL = "https://osm.rangefind.dev/";
 
-// The artifact builder ships with rangefind releases newer than 0.3.7; a
-// sibling checkout covers pre-release runs. Returns null when neither has
-// it — callers then publish a root without the lexicon, exactly like the
-// text/suggest routing feature detection.
+// Production must use the installed package. A sibling checkout must never
+// mask a stale lockfile or an incomplete server deployment.
 export async function loadCategoryLexiconModule() {
-  const candidates = [
-    () => import("rangefind/osm"),
-    () => import(pathToFileURL(join(projectRoot, "..", "rangefind", "src", "integrations", "osm", "category_lexicon.js")).href)
-  ];
-  for (const load of candidates) {
-    try {
-      const module = await load();
-      if (typeof module.buildCategoryLexiconArtifact === "function") return module;
-    } catch {
-      // Try the next candidate.
-    }
+  try {
+    const module = await import("rangefind/osm");
+    if (typeof module.buildCategoryLexiconArtifact === "function") return module;
+  } catch {
+    // Feature detection: callers fail closed or publish no lexicon block.
   }
   return null;
 }
@@ -50,15 +39,23 @@ function loadCache(path) {
   }
 }
 
-async function shardTypeCounts(source) {
+function manifestCacheKey(manifest) {
+  return createHash("sha256").update(JSON.stringify(manifest)).digest("hex");
+}
+
+async function loadShardVocabulary(source, cached = null) {
   const engine = await createNodeSearch({ source });
+  const cacheKey = manifestCacheKey(engine.manifest);
+  if (cached?.key === cacheKey && cached.types && typeof cached.types === "object") {
+    return { cacheKey, counts: cached.types, fetched: false, total: Number(engine.manifest.total) };
+  }
   const values = await engine.loadFacetValues("type");
   const counts = {};
   for (const item of values || []) {
     if (!item?.value) continue;
     counts[item.value] = (counts[item.value] || 0) + Number(item.n || 0);
   }
-  return counts;
+  return { cacheKey, counts, fetched: true, total: Number(engine.manifest.total) };
 }
 
 // shards: [{ id, cacheKey, localDir?, remoteBase? }] — localDir is tried
@@ -71,7 +68,8 @@ export async function mergeShardTypeVocabulary({
   cachePath,
   remoteBase = DEFAULT_PUBLIC_BASE_URL,
   log = () => {},
-  shouldStop = () => false
+  shouldStop = () => false,
+  readShard = loadShardVocabulary
 }) {
   const cache = cachePath ? loadCache(cachePath) : { shards: {} };
   let cacheDirty = false;
@@ -83,27 +81,38 @@ export async function mergeShardTypeVocabulary({
       return null;
     }
     const cached = cache.shards[shard.id];
-    let counts = cached && cached.key === shard.cacheKey ? cached.types : null;
+    let counts = shard.cacheKey && cached?.key === shard.cacheKey ? cached.types : null;
     if (!counts) {
       const sources = [
         ...(shard.localDir ? [shard.localDir] : []),
         new URL(`shards/${shard.id}/`, shard.remoteBase || remoteBase).href
       ];
+      const failures = [];
       for (const source of sources) {
         try {
-          counts = await shardTypeCounts(source);
+          // Pipeline callers provide the state fingerprint and can skip all
+          // reads on a cache hit. Root-only refreshes omit it: opening the
+          // shard manifest yields a content identity, while a matching cache
+          // still avoids loading the facet dictionary itself.
+          const loaded = await readShard(source, shard.cacheKey ? null : cached);
+          if (Number.isFinite(shard.expectedTotal) && loaded.total !== shard.expectedTotal) {
+            throw new Error(`manifest total ${loaded.total} does not match root total ${shard.expectedTotal}`);
+          }
+          counts = loaded.counts;
+          const cacheKey = shard.cacheKey || loaded.cacheKey;
+          if (!cacheKey) throw new Error("source did not provide a cache identity");
+          cache.shards[shard.id] = { key: cacheKey, types: counts };
+          cacheDirty = cacheDirty || loaded.fetched !== false || cached?.key !== cacheKey;
+          if (loaded.fetched !== false) fetched += 1;
           break;
         } catch (error) {
+          failures.push(error?.message || String(error));
           log(`Category lexicon: ${shard.id} via ${source} failed (${error?.message || error}).`);
         }
       }
       if (!counts) {
-        log(`Category lexicon: ${shard.id} unreadable — its vocabulary is skipped this run.`);
-        continue;
+        throw new Error(`Category lexicon: ${shard.id} unreadable; refusing a partial artifact (${failures.join("; ")}).`);
       }
-      fetched += 1;
-      cache.shards[shard.id] = { key: shard.cacheKey, types: counts };
-      cacheDirty = true;
     }
     for (const [value, n] of Object.entries(counts)) {
       merged.set(value, (merged.get(value) || 0) + n);
@@ -111,7 +120,14 @@ export async function mergeShardTypeVocabulary({
   }
   if (cachePath && cacheDirty) {
     mkdirSync(dirname(cachePath), { recursive: true });
-    writeFileSync(cachePath, JSON.stringify(cache));
+    const temporary = `${cachePath}.${process.pid}.tmp`;
+    try {
+      writeFileSync(temporary, JSON.stringify(cache));
+      renameSync(temporary, cachePath);
+    } catch (error) {
+      rmSync(temporary, { force: true });
+      throw error;
+    }
   }
   log(`Category lexicon: ${merged.size} type value(s) across ${shards.length} shard(s) (${fetched} fetched, rest cached).`);
   return [...merged].map(([value, n]) => ({ value, n }));

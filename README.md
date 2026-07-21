@@ -89,7 +89,15 @@ npm run status                         # what's built / uploaded / pending
 npm run update -- --prune             # occasional: delete unreferenced packs on R2
 npm run gc:r2                          # dry-run manifest-aware R2 garbage collection
 npm run gc:r2 -- --apply              # track/delete objects after the grace period
+npm run refresh:root-lexicon           # stage a category-lexicon root refresh
+npm run refresh:root-lexicon -- --upload # conditionally publish it to R2
 ```
+
+The root-lexicon refresh does not rebuild shards. Upload mode shares the
+indexer's process lock, requires every shard vocabulary to be readable, and
+uses conditional R2 writes so it aborts rather than overwriting a root that
+changed during the merge. Run it on the production host with the normal
+`R2_*` environment, never by copying files from `work/root-refresh` manually.
 
 ## Scheduling (cron)
 

@@ -65,6 +65,7 @@ import { readConfig } from "rangefind/config";
 import { createOsmIndexConfig } from "rangefind/osm/node";
 import { extractOsmPlaces } from "rangefind/osm/extract";
 import { createR2Store, listLocalFiles } from "./lib/r2_store.mjs";
+import { acquireProcessLock } from "./lib/process_lock.mjs";
 import { createTaskQueue } from "./lib/serial_task_queue.mjs";
 import {
   DEFAULT_PUBLIC_BASE_URL,
@@ -201,19 +202,7 @@ function createWeightedLimiter(capacity) {
 // --- locking ---------------------------------------------------------------
 
 function acquireLock() {
-  mkdirSync(WORK, { recursive: true });
-  const stale = loadJson(LOCK_PATH, null);
-  if (stale?.pid) {
-    try {
-      process.kill(stale.pid, 0);
-      throw new Error(`Another run is active (pid ${stale.pid}); exiting.`);
-    } catch (error) {
-      if (error.code !== "ESRCH") throw error;
-      log(`Removing stale lock from pid ${stale.pid}`);
-    }
-  }
-  writeFileSync(LOCK_PATH, JSON.stringify({ pid: process.pid, started: new Date().toISOString() }));
-  process.on("exit", () => rmSync(LOCK_PATH, { force: true }));
+  acquireProcessLock(LOCK_PATH, { label: "Another index or root-refresh run", log });
 }
 
 // --- corpus files ------------------------------------------------------------
@@ -1445,6 +1434,10 @@ async function main() {
   const stats = loadScoringStats(statsPath());
   const textRouting = await buildTextRoutingArtifact(built, state, store, args, outOfTime);
   const suggestRouting = await buildSuggestRoutingArtifact(built, state, store, args, outOfTime);
+  // Category vocabulary may need the remote facet dictionaries after shard
+  // cleanup. Ensure every queued shard is durable before those reads so a
+  // local cleanup race can never fall back to the previous remote version.
+  if (args.upload) await uploadQueue.drain();
   const categoryLexicon = await buildCategoryLexiconRootArtifact(built, state, args, outOfTime);
   const rootManifest = writeShardedRootManifest({
     outDir: OUT,
@@ -1472,9 +1465,8 @@ async function main() {
   log(`Root manifest: ${rootManifest.shards.length} shard(s), ${rootManifest.total.toLocaleString()} docs.`);
 
   if (args.upload) {
-    // Builds run ahead of the bounded multi-lane queue. Drain it before checking
-    // remote completeness and atomically publishing the new root manifest.
-    await uploadQueue.drain();
+    // Builds run ahead of the bounded multi-lane queue. It was drained before
+    // the category merge; now verify remote completeness before the root flip.
     for (const [regionIndex, region] of built.entries()) {
       if (outOfTime(2 * 60_000)) {
         log("Deadline near — remaining uploads next run.");

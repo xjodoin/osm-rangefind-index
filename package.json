@@ -11,11 +11,12 @@
     "test": "node --test",
     "update": "node scripts/update_index.mjs",
     "update:dry": "node scripts/update_index.mjs --no-upload",
+    "refresh:root-lexicon": "scripts/refresh_root_lexicon.sh",
     "gc:r2": "scripts/r2_gc.sh",
     "status": "node scripts/update_index.mjs --status"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1090.0",
-    "rangefind": "^0.3.7"
+    "rangefind": "^0.3.8"
   }
 }

@@ -161,16 +161,18 @@ export function createR2Store({
     });
   }
 
-  async function putBytes(remotePath, body) {
+  async function putBytes(remotePath, body, { ifMatch = null, ifNoneMatch = null } = {}) {
     const bytes = Buffer.isBuffer(body) ? body : Buffer.from(body);
-    await send(new PutObjectCommand({
+    const response = await send(new PutObjectCommand({
       Bucket: config.bucket,
       Key: keyOf(remotePath),
       Body: bytes,
       ContentLength: bytes.length,
+      ...(ifMatch ? { IfMatch: ifMatch } : {}),
+      ...(ifNoneMatch ? { IfNoneMatch: ifNoneMatch } : {}),
       ...metadataFor(remotePath)
     }));
-    return { path: remotePath, bytes: bytes.length };
+    return { path: remotePath, bytes: bytes.length, etag: response.ETag || null };
   }
 
   async function putFiles(files, remotePrefix = "", onUploaded = null) {
@@ -184,11 +186,19 @@ export function createR2Store({
     return { files: files.length, bytes };
   }
 
-  async function getText(path) {
+  async function getTextWithMetadata(path) {
     return limited(async () => {
       const response = await s3.send(new GetObjectCommand({ Bucket: config.bucket, Key: keyOf(path) }));
-      return response.Body.transformToString("utf-8");
+      return {
+        text: await response.Body.transformToString("utf-8"),
+        etag: response.ETag || null,
+        lastModified: response.LastModified?.toISOString() || null
+      };
     });
+  }
+
+  async function getText(path) {
+    return (await getTextWithMetadata(path)).text;
   }
 
   async function getFile(path, localPath) {
@@ -291,6 +301,7 @@ export function createR2Store({
     putBytes,
     putFiles,
     getText,
+    getTextWithMetadata,
     getFile,
     exists,
     listObjects,

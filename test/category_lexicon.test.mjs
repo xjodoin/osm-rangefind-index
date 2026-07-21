@@ -8,31 +8,31 @@ import {
   mergeShardTypeVocabulary
 } from "../scripts/lib/category_lexicon.mjs";
 
-test("category lexicon module resolves a builder (npm dependency or sibling checkout)", async () => {
+test("installed rangefind exports the category lexicon builder", async () => {
   const module = await loadCategoryLexiconModule();
-  // Skip-friendly: neither source carrying the builder is a valid state on
-  // machines without the sibling checkout and with rangefind <= 0.3.7.
-  if (!module) return;
+  assert.ok(module, "installed rangefind must export the category lexicon builder");
   const artifact = module.buildCategoryLexiconArtifact([{ value: "cinema", n: 5 }]);
   assert.equal(artifact.facet, "type");
   assert.deepEqual(artifact.types, ["cinema"]);
   assert.equal(artifact.aliases["movie theater"], "cinema");
 });
 
-test("shard vocabulary merge caches by fingerprint and survives unreadable shards", async () => {
+test("shard vocabulary merge fails closed on unreadable shards and caches by fingerprint", async () => {
   const work = await mkdtemp(join(tmpdir(), "osm-lexicon-cache-"));
   try {
     const cachePath = join(work, "cache.json");
     const logs = [];
-    // No local dir and an unreachable remote: the shard is skipped with a
-    // log line instead of failing the publish.
-    const empty = await mergeShardTypeVocabulary({
-      shards: [{ id: "nowhere", cacheKey: "fp1", remoteBase: "http://127.0.0.1:9/" }],
-      cachePath,
-      log: line => logs.push(line)
-    });
-    assert.deepEqual(empty, []);
-    assert.ok(logs.some(line => line.includes("nowhere unreadable")));
+    // A missing shard makes the whole artifact unsafe: callers can then
+    // publish no block and let runtimes use the bundled fallback vocabulary.
+    await assert.rejects(
+      mergeShardTypeVocabulary({
+        shards: [{ id: "nowhere", cacheKey: "fp1", remoteBase: "http://127.0.0.1:9/" }],
+        cachePath,
+        log: line => logs.push(line)
+      }),
+      /refusing a partial artifact/u
+    );
+    assert.ok(logs.some(line => line.includes("nowhere")));
 
     // A cache seeded for the same fingerprint short-circuits any fetch.
     const { writeFileSync } = await import("node:fs");
@@ -50,6 +50,39 @@ test("shard vocabulary merge caches by fingerprint and survives unreadable shard
     // The cache file was not clobbered by the read-only run.
     const persisted = JSON.parse(await readFile(cachePath, "utf8"));
     assert.equal(persisted.shards.quebec.key, "fp2");
+
+    // Root-only refreshes do not have the private build fingerprint. They
+    // validate the cached entry against the shard manifest identity and can
+    // skip the facet read while still noticing future same-total rebuilds.
+    let reads = 0;
+    const discovered = await mergeShardTypeVocabulary({
+      shards: [{ id: "quebec", remoteBase: "https://unused.invalid/" }],
+      cachePath,
+      readShard: async (_source, cached) => {
+        reads++;
+        assert.equal(cached.key, "fp2");
+        return { cacheKey: "fp2", counts: cached.types, fetched: false, total: 15 };
+      }
+    });
+    assert.equal(reads, 1);
+    assert.deepEqual(discovered.sort((a, b) => a.value.localeCompare(b.value)), [
+      { value: "bakery", n: 3 },
+      { value: "cinema", n: 12 }
+    ]);
+
+    await assert.rejects(
+      mergeShardTypeVocabulary({
+        shards: [{ id: "quebec", expectedTotal: 16, remoteBase: "https://unused.invalid/" }],
+        cachePath,
+        readShard: async (_source, cached) => ({
+          cacheKey: "fp2",
+          counts: cached.types,
+          fetched: false,
+          total: 15
+        })
+      }),
+      /does not match root total/u
+    );
   } finally {
     await rm(work, { recursive: true, force: true });
   }

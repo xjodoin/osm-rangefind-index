@@ -114,6 +114,37 @@ test("uploads files with immutable metadata and the configured key prefix", asyn
   }
 });
 
+test("conditional byte uploads forward ETags and expose object metadata", async () => {
+  const commands = [];
+  const client = {
+    send: async command => {
+      commands.push(command);
+      if (command.constructor.name === "GetObjectCommand") {
+        return {
+          Body: { transformToString: async () => "root" },
+          ETag: "\"old\"",
+          LastModified: new Date("2026-07-20T00:00:00Z")
+        };
+      }
+      return { ETag: "\"new\"" };
+    },
+    destroy() {}
+  };
+  const store = createR2Store({ env, client });
+  assert.deepEqual(await store.getTextWithMetadata("manifest.json"), {
+    text: "root",
+    etag: "\"old\"",
+    lastModified: "2026-07-20T00:00:00.000Z"
+  });
+  assert.deepEqual(
+    await store.putBytes("manifest.json", "updated", { ifMatch: "\"old\"" }),
+    { path: "manifest.json", bytes: 7, etag: "\"new\"" }
+  );
+  const put = commands.find(command => command.constructor.name === "PutObjectCommand");
+  assert.equal(put.input.IfMatch, "\"old\"");
+  assert.equal(put.input.CacheControl, "no-cache");
+});
+
 test("paginates listings and batches deletes at the S3 limit", async () => {
   const commands = [];
   const client = {
