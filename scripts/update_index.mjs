@@ -66,6 +66,11 @@ import { createOsmIndexConfig } from "rangefind/osm/node";
 import { extractOsmPlaces } from "rangefind/osm/extract";
 import { createR2Store, listLocalFiles } from "./lib/r2_store.mjs";
 import { createTaskQueue } from "./lib/serial_task_queue.mjs";
+import {
+  DEFAULT_PUBLIC_BASE_URL,
+  loadCategoryLexiconModule,
+  mergeShardTypeVocabulary
+} from "./lib/category_lexicon.mjs";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const WORK = join(projectRoot, "work");
@@ -91,7 +96,8 @@ function parseArgs(argv) {
     keepArtifacts: false,
     partial: false,
     textRouting: true,
-    suggestRouting: true
+    suggestRouting: true,
+    categoryLexicon: true
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -106,6 +112,7 @@ function parseArgs(argv) {
     else if (arg === "--partial") args.partial = true;
     else if (arg === "--no-text-routing") args.textRouting = false;
     else if (arg === "--no-suggest-routing") args.suggestRouting = false;
+    else if (arg === "--no-category-lexicon") args.categoryLexicon = false;
     else throw new Error(`Unknown argument: ${arg}`);
   }
   return args;
@@ -865,6 +872,40 @@ async function buildSuggestRoutingArtifact(built, state, store, args, outOfTime)
   }
 }
 
+// Category lexicon: the merged `type` facet vocabulary across every shard,
+// joined with the rangefind alias table and embedded in the root manifest —
+// the query planner then gates bare category words ("cinema", "boulangerie")
+// on the corpus's own vocabulary. Feature-detected like text/suggest
+// routing: a rangefind without the builder publishes a root without the
+// block, and the browser bundle falls back to its bundled vocabulary.
+async function buildCategoryLexiconRootArtifact(built, state, args, outOfTime) {
+  if (!args.categoryLexicon) return null;
+  const lexiconModule = await loadCategoryLexiconModule();
+  if (!lexiconModule) {
+    log("Category lexicon: rangefind lacks the artifact builder — root published without it.");
+    return null;
+  }
+  try {
+    const merged = await mergeShardTypeVocabulary({
+      shards: built.map(region => ({
+        id: region.id,
+        cacheKey: state.regions[region.id]?.builtFingerprint || "",
+        // Reclaimed shards keep only manifests locally; the merge falls
+        // back to the published copy for their facet dictionaries.
+        localDir: shardDir(region)
+      })),
+      cachePath: join(WORK, "category-lexicon-cache.json"),
+      remoteBase: process.env.OSM_PUBLIC_BASE_URL || DEFAULT_PUBLIC_BASE_URL,
+      log,
+      shouldStop: () => outOfTime(60_000)
+    });
+    return merged ? lexiconModule.buildCategoryLexiconArtifact(merged) : null;
+  } catch (error) {
+    log(`Category lexicon build failed (root published without it): ${error.message}`);
+    return null;
+  }
+}
+
 function statusSnapshot(regions, state) {
   const rows = regions.map(region => {
     const entry = state.regions[region.id] || {};
@@ -1404,6 +1445,7 @@ async function main() {
   const stats = loadScoringStats(statsPath());
   const textRouting = await buildTextRoutingArtifact(built, state, store, args, outOfTime);
   const suggestRouting = await buildSuggestRoutingArtifact(built, state, store, args, outOfTime);
+  const categoryLexicon = await buildCategoryLexiconRootArtifact(built, state, args, outOfTime);
   const rootManifest = writeShardedRootManifest({
     outDir: OUT,
     shards: built.map(region => ({
@@ -1416,6 +1458,7 @@ async function main() {
     textRouting,
     suggestRouting,
     extra: {
+      ...(categoryLexicon ? { category_lexicon: categoryLexicon } : {}),
       // Root-level provenance: the OSM attribution block without any
       // region-specific fields; per-shard manifests carry source URLs and
       // data versions.
