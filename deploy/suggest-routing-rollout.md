@@ -21,7 +21,7 @@ sequence is:
    (during the build, before cleanup — no backfill needed on a full
    rebuild) and merges them into the root `authority/` artifact
    (`SUGGEST_ROUTING_BASE_SHARD_DEPTH`, default 10, bounds the largest
-   in-memory prefix group; `SUGGEST_ROUTING_HEAP_MB`, default 8192, sizes
+   in-memory prefix group; `SUGGEST_ROUTING_HEAP_MB`, default 12288, sizes
    the isolated merge worker).
 5. After the root manifest flips, verify:
    - `manifest.json` has a `suggest_routing` block;

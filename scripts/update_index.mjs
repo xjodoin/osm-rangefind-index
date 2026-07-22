@@ -862,7 +862,7 @@ async function buildSuggestRoutingArtifact(built, state, store, args, outOfTime)
       baseShardDepth,
       maxShardDepth
     }));
-    const heapMb = Math.max(4096, Math.min(24576, Number(process.env.SUGGEST_ROUTING_HEAP_MB || 8192) || 8192));
+    const heapMb = Math.max(4096, Math.min(24576, Number(process.env.SUGGEST_ROUTING_HEAP_MB || 12288) || 12288));
     const block = await runTextRoutingWorker(["suggest-routing", workerConfig], heapMb);
     writeFileSync(SUGGEST_ROUTING_BLOCK_PATH, JSON.stringify(block));
     state.suggestRoutingFingerprint = fingerprint;
