@@ -20,7 +20,7 @@ sequence is:
 4. First run also writes `work/suggest-sets/<id>.suggest.gz` per shard
    (during the build, before cleanup — no backfill needed on a full
    rebuild) and merges them into the root `authority/` artifact
-   (`SUGGEST_ROUTING_BASE_SHARD_DEPTH`, default 8, bounds the largest
+   (`SUGGEST_ROUTING_BASE_SHARD_DEPTH`, default 10, bounds the largest
    in-memory prefix group; `SUGGEST_ROUTING_HEAP_MB`, default 8192, sizes
    the isolated merge worker).
 5. After the root manifest flips, verify:

@@ -850,12 +850,12 @@ async function buildSuggestRoutingArtifact(built, state, store, args, outOfTime)
     // adjacent keys before recursively partitioning them. At the library
     // default depth ("s|" plus two normalized characters), planet-scale
     // prefixes can still retain millions of entries. Start the physical
-    // partitions four characters deeper; lookup remains compatible because
+    // partitions six characters deeper; lookup remains compatible because
     // the resulting depth is recorded in the root manifest.
     const baseShardDepth = Math.max(4, Math.min(12,
-      Number(process.env.SUGGEST_ROUTING_BASE_SHARD_DEPTH || 8) || 8));
+      Number(process.env.SUGGEST_ROUTING_BASE_SHARD_DEPTH || 10) || 10));
     const maxShardDepth = Math.max(baseShardDepth, Math.min(16,
-      Number(process.env.SUGGEST_ROUTING_MAX_SHARD_DEPTH || 12) || 12));
+      Number(process.env.SUGGEST_ROUTING_MAX_SHARD_DEPTH || 14) || 14));
     writeFileSync(workerConfig, JSON.stringify({
       outDir: OUT,
       shards: built.map(region => ({ id: region.id, suggestSet: suggestSetPath(region) })),
