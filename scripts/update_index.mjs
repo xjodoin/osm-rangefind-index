@@ -844,11 +844,23 @@ async function buildSuggestRoutingArtifact(built, state, store, args, outOfTime)
     const started = Date.now();
     rmSync(join(OUT, "authority"), { recursive: true, force: true });
     const workerConfig = join(WORK, "suggest-routing-worker.json");
+    // `writeSuggestRoutingIndex` streams the shard sidecars, but it groups
+    // adjacent keys before recursively partitioning them. At the library
+    // default depth ("s|" plus two normalized characters), planet-scale
+    // prefixes can still retain millions of entries. Start the physical
+    // partitions four characters deeper; lookup remains compatible because
+    // the resulting depth is recorded in the root manifest.
+    const baseShardDepth = Math.max(4, Math.min(12,
+      Number(process.env.SUGGEST_ROUTING_BASE_SHARD_DEPTH || 8) || 8));
+    const maxShardDepth = Math.max(baseShardDepth, Math.min(16,
+      Number(process.env.SUGGEST_ROUTING_MAX_SHARD_DEPTH || 12) || 12));
     writeFileSync(workerConfig, JSON.stringify({
       outDir: OUT,
-      shards: built.map(region => ({ id: region.id, suggestSet: suggestSetPath(region) }))
+      shards: built.map(region => ({ id: region.id, suggestSet: suggestSetPath(region) })),
+      baseShardDepth,
+      maxShardDepth
     }));
-    const heapMb = Math.max(4096, Math.min(24576, Number(process.env.SUGGEST_ROUTING_HEAP_MB || 12288) || 12288));
+    const heapMb = Math.max(4096, Math.min(24576, Number(process.env.SUGGEST_ROUTING_HEAP_MB || 8192) || 8192));
     const block = await runTextRoutingWorker(["suggest-routing", workerConfig], heapMb);
     writeFileSync(SUGGEST_ROUTING_BLOCK_PATH, JSON.stringify(block));
     state.suggestRoutingFingerprint = fingerprint;
