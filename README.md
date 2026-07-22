@@ -91,6 +91,7 @@ npm run gc:r2                          # dry-run manifest-aware R2 garbage colle
 npm run gc:r2 -- --apply              # track/delete objects after the grace period
 npm run refresh:root-lexicon           # stage a category-lexicon root refresh
 npm run refresh:root-lexicon -- --upload # conditionally publish it to R2
+node scripts/update_index.mjs --finalize-only --max-hours 8 # publish existing completed shards and routing
 ```
 
 The root-lexicon refresh does not rebuild shards. Upload mode shares the
@@ -98,6 +99,11 @@ indexer's process lock, requires every shard vocabulary to be readable, and
 uses conditional R2 writes so it aborts rather than overwriting a root that
 changed during the merge. Run it on the production host with the normal
 `R2_*` environment, never by copying files from `work/root-refresh` manually.
+
+`--finalize-only` is the recovery path after an interrupted root routing
+merge. It reuses existing scoring stats, built shard manifests, and
+checkpointed term/suggest sidecars; it does not download PBFs or build shard
+updates. Normal scheduled runs remain unchanged.
 
 ## Scheduling (cron)
 

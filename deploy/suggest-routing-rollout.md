@@ -31,5 +31,9 @@ sequence is:
    - `node scripts/osm_mobile_bench.mjs` for the phone-side numbers;
    - a brand+town query ("jean coutu rosemère") returns the POI.
 
+If the shard pass completed but root routing finalization was interrupted,
+resume with `scripts/nightly.sh --finalize-only --max-hours 8`. This reuses
+the 310 checkpointed sidecars and cannot be starved by a new daily PBF cycle.
+
 Escape hatches: `--no-suggest-routing` skips the artifact (suggest falls
 back to fan-out); the runtime fails open on any missing/broken artifact.

@@ -43,7 +43,7 @@
 // Usage:
 //   node scripts/update_index.mjs [--deadline HH:MM] [--max-hours N]
 //     [--regions id,id] [--no-upload] [--force-stats] [--prune]
-//     [--keep-artifacts] [--status]
+//     [--keep-artifacts] [--finalize-only] [--status]
 //
 // Environment (see .env.example): direct Cloudflare R2/S3 credentials.
 
@@ -95,6 +95,7 @@ function parseArgs(argv) {
     prune: false,
     status: false,
     keepArtifacts: false,
+    finalizeOnly: false,
     partial: false,
     textRouting: true,
     suggestRouting: true,
@@ -110,6 +111,7 @@ function parseArgs(argv) {
     else if (arg === "--prune") args.prune = true;
     else if (arg === "--status") args.status = true;
     else if (arg === "--keep-artifacts") args.keepArtifacts = true;
+    else if (arg === "--finalize-only") args.finalizeOnly = true;
     else if (arg === "--partial") args.partial = true;
     else if (arg === "--no-text-routing") args.textRouting = false;
     else if (arg === "--no-suggest-routing") args.suggestRouting = false;
@@ -1243,7 +1245,9 @@ async function main() {
   const buildFirst = !args.regions
     && !args.partial
     && bootstrapPublicationPending(regions, state, args.upload);
-  if (buildFirst) {
+  if (args.finalizeOnly) {
+    log("Finalize-only: skipping upstream acquisition and shard builds.");
+  } else if (buildFirst) {
     const published = new Set(state.publishedRoot?.regionIds || []);
     const builtCount = regions.filter(region => state.regions[region.id]?.builtFingerprint).length;
     const publishedCount = regions.filter(region => published.has(region.id)).length;
@@ -1325,7 +1329,13 @@ async function main() {
   // explicit --partial run is the deliberate exception used for bring-up
   // and smoke tests; the next full run will regenerate stats for all regions.
   updateProgress("preparing", null, ready.length, regions.length);
-  await ensureScoringStats(ready, options, state, args.forceStats, !args.regions || args.partial);
+  if (args.finalizeOnly) {
+    if (!existsSync(statsPath())) {
+      throw new Error("Finalize-only requires an existing scoring-stats artifact.");
+    }
+  } else {
+    await ensureScoringStats(ready, options, state, args.forceStats, !args.regions || args.partial);
+  }
 
   // Existing cleaned shards need one remote term-set backfill for federated
   // routing. Do that before builds so a full nightly build window cannot
@@ -1363,7 +1373,7 @@ async function main() {
   }
 
   // 4: rebuild stale shards until the deadline.
-  const stale = ready.filter(region => {
+  const stale = args.finalizeOnly ? [] : ready.filter(region => {
     try {
       return shardFingerprint(region, state) !== state.regions[region.id]?.builtFingerprint;
     } catch {
