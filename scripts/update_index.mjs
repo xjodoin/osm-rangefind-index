@@ -66,6 +66,7 @@ import { createOsmIndexConfig } from "rangefind/osm/node";
 import { extractOsmPlaces } from "rangefind/osm/extract";
 import { createR2Store, listLocalFiles } from "./lib/r2_store.mjs";
 import { acquireProcessLock } from "./lib/process_lock.mjs";
+import { appendStaleObjectPaths } from "./lib/root_artifacts.mjs";
 import { createTaskQueue } from "./lib/serial_task_queue.mjs";
 import {
   DEFAULT_PUBLIC_BASE_URL,
@@ -571,9 +572,11 @@ async function uploadRoot(store, args) {
     await store.putFiles(files, prefix);
     if (args?.prune) {
       const keep = new Set(files.map(file => `${prefix}/${file.relative}`));
-      staleByPrefix.push(...(await store.listObjects(`${prefix}/`))
-        .map(object => object.path)
-        .filter(path => !keep.has(path)));
+      appendStaleObjectPaths(
+        staleByPrefix,
+        await store.listObjects(`${prefix}/`),
+        keep
+      );
     }
   }
   for (const name of ["manifest.json", "manifest.min.json"]) {
