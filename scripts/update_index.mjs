@@ -593,6 +593,10 @@ const TEXT_ROUTING_BLOCK_PATH = join(WORK, "text-routing-block.json");
 const SUGGEST_SETS_DIR = join(WORK, "suggest-sets");
 const SUGGEST_ROUTING_BLOCK_PATH = join(WORK, "suggest-routing-block.json");
 const TEXT_ROUTING_WORKER = join(projectRoot, "scripts/text_routing_worker.mjs");
+// Bump whenever the root suggest artifact layout changes independently of
+// shard content. The fingerprint must invalidate the checkpointed manifest
+// block so a finalize-only run rebuilds routing from the existing sidecars.
+const SUGGEST_ROUTING_SCHEMA_VERSION = 2;
 
 function termSetPath(region) {
   return join(TERM_SETS_DIR, `${region.id.replaceAll("/", "-")}.terms.gz`);
@@ -832,6 +836,7 @@ async function buildSuggestRoutingArtifact(built, state, store, args, outOfTime)
   }
   if (!await prepareSuggestSets(built, state, store, args, outOfTime, 10 * 60_000)) return null;
   const fingerprint = createHash("sha1")
+    .update(`suggest-routing-schema:${SUGGEST_ROUTING_SCHEMA_VERSION}\n`)
     .update(JSON.stringify(built.map(region => [region.id, state.regions[region.id]?.builtFingerprint || ""])))
     .digest("hex");
   const existing = loadJson(SUGGEST_ROUTING_BLOCK_PATH, null);
