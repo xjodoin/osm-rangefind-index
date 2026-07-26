@@ -4,7 +4,8 @@ import {
   buildContentFingerprint,
   buildShardFingerprint,
   previouslyBuiltContentFingerprint,
-  selectRootCandidates
+  selectRootCandidates,
+  shouldReuseFrozenStats
 } from "../scripts/lib/build_identity.mjs";
 
 test("builder upgrades invalidate shards without invalidating unchanged routing content", () => {
@@ -38,4 +39,10 @@ test("region-scoped production publication retains the complete root", () => {
     regionScoped: true,
     partial: true
   }), selected);
+});
+
+test("region-scoped production builds reuse planet scoring stats", () => {
+  assert.equal(shouldReuseFrozenStats({ regionScoped: true, partial: false }), true);
+  assert.equal(shouldReuseFrozenStats({ regionScoped: true, partial: true }), false);
+  assert.equal(shouldReuseFrozenStats({ regionScoped: false, partial: false }), false);
 });

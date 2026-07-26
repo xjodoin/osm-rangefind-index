@@ -15,3 +15,7 @@ export function previouslyBuiltContentFingerprint(entry = {}) {
 export function selectRootCandidates({ selected, all, regionScoped, partial }) {
   return regionScoped && !partial ? all : selected;
 }
+
+export function shouldReuseFrozenStats({ regionScoped, partial }) {
+  return regionScoped && !partial;
+}

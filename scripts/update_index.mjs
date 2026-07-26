@@ -73,7 +73,8 @@ import {
   buildContentFingerprint,
   buildShardFingerprint,
   previouslyBuiltContentFingerprint,
-  selectRootCandidates
+  selectRootCandidates,
+  shouldReuseFrozenStats
 } from "./lib/build_identity.mjs";
 import {
   DEFAULT_PUBLIC_BASE_URL,
@@ -1375,6 +1376,14 @@ async function main() {
     if (!existsSync(statsPath())) {
       throw new Error("Finalize-only requires an existing scoring-stats artifact.");
     }
+  } else if (shouldReuseFrozenStats({
+    regionScoped: Boolean(args.regions),
+    partial: args.partial
+  })) {
+    if (!existsSync(statsPath())) {
+      throw new Error("Region-scoped builds require the existing planet scoring-stats artifact.");
+    }
+    log("Region-scoped build: reusing frozen planet scoring stats.");
   } else {
     await ensureScoringStats(ready, options, state, args.forceStats, !args.regions || args.partial);
   }
