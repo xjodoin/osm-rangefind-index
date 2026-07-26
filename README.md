@@ -94,6 +94,11 @@ npm run refresh:root-lexicon -- --upload # conditionally publish it to R2
 node scripts/update_index.mjs --finalize-only --max-hours 8 # publish existing completed shards and routing
 ```
 
+A region-scoped production run rebuilds only the selected regions but
+publishes them into the complete existing root; it never replaces the planet
+root with a one-shard manifest. `--partial` is the explicit isolated
+bring-up mode.
+
 The root-lexicon refresh does not rebuild shards. Upload mode shares the
 indexer's process lock, requires every shard vocabulary to be readable, and
 uses conditional R2 writes so it aborts rather than overwriting a root that
@@ -137,7 +142,8 @@ added/changed documents build as a small `--update` generation against the
 same frozen stats artifact — proven identical to a full rebuild — so a
 typical nightly region refresh uploads kilobytes, not gigabytes, and leaves
 CDN caches for every existing pack intact. A **full rebuild** happens only
-when: the delta exceeds `maxDeltaRatio` (default 30%), pending deletions
+when: the installed Rangefind builder version changes, the delta exceeds
+`maxDeltaRatio` (default 30%), pending deletions
 exceed `maxDeletedRatio` (default 0.5% — deltas cannot remove documents, so
 deleted places linger until the next full rebuild), the shard reaches
 `maxGenerations` (default 6), or the stats artifact was regenerated.
@@ -147,6 +153,10 @@ Regenerating the stats artifact intentionally invalidates **all** shards
 between regenerations, updated regions stay exactly comparable with
 untouched shards. Drift only shifts idf slightly, and 10% corpus growth is
 years of OSM edits for most regions.
+
+Builder identity and logical corpus identity are tracked separately. An
+encoding-only Rangefind upgrade forces correct shard rewrites while retaining
+unchanged root term/suggest routing artifacts.
 
 Publish ordering is reader-safe: shard packs upload before generation
 manifests, stable shard manifests publish last, and the root manifest uploads

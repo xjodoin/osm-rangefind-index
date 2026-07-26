@@ -50,6 +50,7 @@
 import { fork, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { availableParallelism, hostname } from "node:os";
 import { pipeline } from "node:stream/promises";
@@ -69,12 +70,20 @@ import { acquireProcessLock } from "./lib/process_lock.mjs";
 import { appendStaleObjectPaths } from "./lib/root_artifacts.mjs";
 import { createTaskQueue } from "./lib/serial_task_queue.mjs";
 import {
+  buildContentFingerprint,
+  buildShardFingerprint,
+  previouslyBuiltContentFingerprint,
+  selectRootCandidates
+} from "./lib/build_identity.mjs";
+import {
   DEFAULT_PUBLIC_BASE_URL,
   loadCategoryLexiconModule,
   mergeShardTypeVocabulary
 } from "./lib/category_lexicon.mjs";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const taskRequire = createRequire(import.meta.url);
+const RANGEFIND_VERSION = taskRequire("rangefind/package.json").version;
 const WORK = join(projectRoot, "work");
 const OUT = join(WORK, "public/rangefind");
 const STATE_PATH = join(WORK, "state.json");
@@ -455,12 +464,34 @@ function statsFingerprint() {
   return `${stats.size}:${Math.floor(stats.mtimeMs)}`;
 }
 
-// What a built shard depends on: the upstream corpus version and the frozen
-// stats artifact — deliberately not file mtimes, so compressing/deleting
-// local artifacts never triggers a rebuild.
-function shardFingerprint(region, state) {
+// The logical corpus identity intentionally excludes the Rangefind package:
+// root term/suggest routing remains reusable across encoding-only upgrades.
+// Bump a separate routing schema when a library release changes analysis or
+// authority semantics.
+function shardContentFingerprint(region, state) {
   const entry = state.regions[region.id] || {};
-  return `${entry.extractIdentity || "?"}:${entry.extractSchema || 0}:${entry.docs || 0}:${statsFingerprint()}:${JSON.stringify(region.overrides || null)}`;
+  return buildContentFingerprint({
+    entry,
+    statsFingerprint: statsFingerprint(),
+    overrides: region.overrides || null
+  });
+}
+
+// A built shard also depends on the exact Rangefind builder. Without this
+// identity an encoding fix can be incorrectly accepted as a no-op because
+// the extracted OSM documents themselves did not change.
+function shardFingerprint(region, state) {
+  return buildShardFingerprint({
+    rangefindVersion: RANGEFIND_VERSION,
+    contentFingerprint: shardContentFingerprint(region, state)
+  });
+}
+
+function builtContentFingerprint(entry) {
+  // Existing state predates this field and stored the content-only identity
+  // directly in builtFingerprint. Preserve that value during migration so an
+  // encoding-only rebuild does not regenerate planet-scale routing artifacts.
+  return previouslyBuiltContentFingerprint(entry);
 }
 
 function shardDir(region) {
@@ -479,6 +510,9 @@ async function planShardBuild(region, options, state) {
   const entry = state.regions[region.id] || {};
   const full = reason => ({ update: false, reason });
   if (!entry.builtFingerprint || !existsSync(join(shardDir(region), "manifest.json"))) return full("no base shard");
+  if (entry.builtRangefindVersion !== RANGEFIND_VERSION) {
+    return full(`Rangefind builder changed (${entry.builtRangefindVersion || "unknown"} -> ${RANGEFIND_VERSION})`);
+  }
   if (entry.builtStats !== statsFingerprint()) return full("stats artifact changed");
   if (!existsSync(regionJsonlGz(region))) return full("no corpus snapshot to diff against");
   if (!existsSync(regionJsonl(region))) return full("no fresh extraction");
@@ -718,7 +752,7 @@ async function buildTextRoutingArtifact(built, state, store, args, outOfTime) {
   }
   if (!await prepareTextRoutingTermSets(built, state, store, args, outOfTime, 10 * 60_000)) return null;
   const fingerprint = createHash("sha1")
-    .update(JSON.stringify(built.map(region => [region.id, state.regions[region.id]?.builtFingerprint || ""])))
+    .update(JSON.stringify(built.map(region => [region.id, builtContentFingerprint(state.regions[region.id] || {})])))
     .digest("hex");
   const existing = loadJson(TEXT_ROUTING_BLOCK_PATH, null);
   if (state.textRoutingFingerprint === fingerprint && existing && existsSync(join(OUT, "text-routing"))) {
@@ -840,7 +874,7 @@ async function buildSuggestRoutingArtifact(built, state, store, args, outOfTime)
   if (!await prepareSuggestSets(built, state, store, args, outOfTime, 10 * 60_000)) return null;
   const fingerprint = createHash("sha1")
     .update(`suggest-routing-schema:${SUGGEST_ROUTING_SCHEMA_VERSION}\n`)
-    .update(JSON.stringify(built.map(region => [region.id, state.regions[region.id]?.builtFingerprint || ""])))
+    .update(JSON.stringify(built.map(region => [region.id, builtContentFingerprint(state.regions[region.id] || {})])))
     .digest("hex");
   const existing = loadJson(SUGGEST_ROUTING_BLOCK_PATH, null);
   if (state.suggestRoutingFingerprint === fingerprint && existing && existsSync(join(OUT, "authority"))) {
@@ -1404,6 +1438,8 @@ async function main() {
       // Upstream churn without any place-document change (metadata-only OSM
       // edits): mark current without touching the index.
       entry.builtFingerprint = shardFingerprint(region, state);
+      entry.builtContentFingerprint = shardContentFingerprint(region, state);
+      entry.builtRangefindVersion = RANGEFIND_VERSION;
       entry.builtStats = statsFingerprint();
       saveState(state);
       log(`${region.id}: corpus unchanged — shard already current.`);
@@ -1424,6 +1460,8 @@ async function main() {
     const ok = await buildShard(region, options, remaining() - finalizationReserveMs, plan, state);
     if (ok) {
       entry.builtFingerprint = shardFingerprint(region, state);
+      entry.builtContentFingerprint = shardContentFingerprint(region, state);
+      entry.builtRangefindVersion = RANGEFIND_VERSION;
       entry.builtStats = statsFingerprint();
       entry.deletedPending = plan.update ? plan.deletedPending : 0;
       // Deltas leave the local copy partial when cleanup already ran; only
@@ -1454,7 +1492,16 @@ async function main() {
   }
 
   // 5 + 6: publish everything built and consistent, then reclaim disk.
-  const built = ready.filter(region =>
+  // A region-scoped production rebuild must never replace the planet root
+  // with only the selected shard. Keep every existing built shard in the
+  // publication set; --partial remains the explicit isolated bring-up mode.
+  const rootCandidates = selectRootCandidates({
+    selected: ready,
+    all: allRegions,
+    regionScoped: Boolean(args.regions),
+    partial: args.partial
+  });
+  const built = rootCandidates.filter(region =>
     state.regions[region.id]?.builtFingerprint
     && existsSync(join(OUT, "shards", region.id, "manifest.min.json")));
   if (!built.length) {
