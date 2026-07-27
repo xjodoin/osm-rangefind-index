@@ -77,6 +77,7 @@ import { fetchSource } from "./lib/source_fetch.mjs";
 import {
   buildContentFingerprint,
   buildShardFingerprint,
+  previouslyBuiltBuilderVersion,
   previouslyBuiltContentFingerprint,
   selectRootCandidates,
   shouldReuseFrozenStats
@@ -90,6 +91,10 @@ import {
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const taskRequire = createRequire(import.meta.url);
 const RANGEFIND_VERSION = taskRequire("rangefind/package.json").version;
+// Runtime-only releases must not invalidate every published shard. Keep this
+// at the newest Rangefind release that changed builder output or analysis
+// semantics, and bump it deliberately when artifacts really must be rebuilt.
+const RANGEFIND_BUILDER_VERSION = "0.3.16";
 const WORK = join(projectRoot, "work");
 const OUT = join(WORK, "public/rangefind");
 const STATE_PATH = join(WORK, "state.json");
@@ -501,6 +506,7 @@ function shardContentFingerprint(region, state) {
 function shardFingerprint(region, state) {
   return buildShardFingerprint({
     rangefindVersion: RANGEFIND_VERSION,
+    builderVersion: RANGEFIND_BUILDER_VERSION,
     contentFingerprint: shardContentFingerprint(region, state)
   });
 }
@@ -528,8 +534,9 @@ async function planShardBuild(region, options, state) {
   const entry = state.regions[region.id] || {};
   const full = reason => ({ update: false, reason });
   if (!entry.builtFingerprint || !existsSync(join(shardDir(region), "manifest.json"))) return full("no base shard");
-  if (entry.builtRangefindVersion !== RANGEFIND_VERSION) {
-    return full(`Rangefind builder changed (${entry.builtRangefindVersion || "unknown"} -> ${RANGEFIND_VERSION})`);
+  const builtBuilderVersion = previouslyBuiltBuilderVersion(entry);
+  if (builtBuilderVersion !== RANGEFIND_BUILDER_VERSION) {
+    return full(`Rangefind builder changed (${builtBuilderVersion || "unknown"} -> ${RANGEFIND_BUILDER_VERSION})`);
   }
   if (entry.builtStats !== statsFingerprint()) return full("stats artifact changed");
   if (!existsSync(regionJsonlGz(region))) return full("no corpus snapshot to diff against");
@@ -1478,6 +1485,7 @@ async function main() {
       entry.builtFingerprint = shardFingerprint(region, state);
       entry.builtContentFingerprint = shardContentFingerprint(region, state);
       entry.builtRangefindVersion = RANGEFIND_VERSION;
+      entry.builtRangefindBuilderVersion = RANGEFIND_BUILDER_VERSION;
       entry.builtStats = statsFingerprint();
       saveState(state);
       log(`${region.id}: corpus unchanged — shard already current.`);
@@ -1500,6 +1508,7 @@ async function main() {
       entry.builtFingerprint = shardFingerprint(region, state);
       entry.builtContentFingerprint = shardContentFingerprint(region, state);
       entry.builtRangefindVersion = RANGEFIND_VERSION;
+      entry.builtRangefindBuilderVersion = RANGEFIND_BUILDER_VERSION;
       entry.builtStats = statsFingerprint();
       entry.deletedPending = plan.update ? plan.deletedPending : 0;
       // Deltas leave the local copy partial when cleanup already ran; only

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildContentFingerprint,
   buildShardFingerprint,
+  previouslyBuiltBuilderVersion,
   previouslyBuiltContentFingerprint,
   selectRootCandidates,
   shouldReuseFrozenStats
@@ -19,8 +20,27 @@ test("builder upgrades invalidate shards without invalidating unchanged routing 
     `rangefind@0.3.15:${content}`
   );
   assert.equal(
+    buildShardFingerprint({
+      rangefindVersion: "0.3.18",
+      builderVersion: "0.3.16",
+      contentFingerprint: content
+    }),
+    `rangefind@0.3.16:${content}`
+  );
+  assert.equal(
     previouslyBuiltContentFingerprint({ builtFingerprint: content }),
     content
+  );
+  assert.equal(
+    previouslyBuiltBuilderVersion({ builtRangefindVersion: "0.3.16" }),
+    "0.3.16"
+  );
+  assert.equal(
+    previouslyBuiltBuilderVersion({
+      builtRangefindVersion: "0.3.18",
+      builtRangefindBuilderVersion: "0.3.16"
+    }),
+    "0.3.16"
   );
 });
 
