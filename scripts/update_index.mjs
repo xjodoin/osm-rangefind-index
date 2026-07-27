@@ -69,6 +69,7 @@ import { createR2Store, listLocalFiles } from "./lib/r2_store.mjs";
 import { acquireProcessLock } from "./lib/process_lock.mjs";
 import { appendStaleObjectPaths } from "./lib/root_artifacts.mjs";
 import { createTaskQueue } from "./lib/serial_task_queue.mjs";
+import { fetchSource } from "./lib/source_fetch.mjs";
 import {
   buildContentFingerprint,
   buildShardFingerprint,
@@ -91,6 +92,10 @@ const STATE_PATH = join(WORK, "state.json");
 const LOCK_PATH = join(WORK, ".lock");
 const STATS_DIR = join(WORK, "scoring-stats");
 const CORPUS_DELTA_WORKER = join(projectRoot, "scripts/compute_delta_worker.mjs");
+const SOURCE_REQUEST_TIMEOUT_MS = Math.max(
+  1_000,
+  Number(process.env.SOURCE_REQUEST_TIMEOUT_MS || 30_000)
+);
 // Rangefind 0.3.6 locality enrichment changed normalized OSM documents.
 // Keep this in the orchestrator identity so a package upgrade cannot reuse a
 // corpus produced by an older extractor before extractOsmPlaces sees it.
@@ -311,7 +316,11 @@ async function refreshPbf(region, state) {
     return { bytes: statSync(region.pbf).size };
   }
   const url = `https://download.geofabrik.de/${region.geofabrik}-latest.osm.pbf`;
-  const head = await fetch(url, { method: "HEAD" });
+  const head = await fetchSource(
+    url,
+    { method: "HEAD" },
+    { timeoutMs: SOURCE_REQUEST_TIMEOUT_MS }
+  );
   if (!head.ok) throw new Error(`${region.id}: HEAD ${url} → ${head.status}`);
   const lastModified = head.headers.get("last-modified") || "";
   const bytes = Math.max(0, Number(head.headers.get("content-length") || 0));
@@ -328,7 +337,11 @@ async function refreshPbf(region, state) {
   log(`${region.id}: downloading ${url} (${lastModified || "unknown date"})`);
   mkdirSync(dirname(region.pbf), { recursive: true });
   const tmp = `${region.pbf}.download`;
-  const response = await fetch(url);
+  const response = await fetchSource(
+    url,
+    {},
+    { timeoutMs: SOURCE_REQUEST_TIMEOUT_MS }
+  );
   if (!response.ok) throw new Error(`${region.id}: GET ${url} → ${response.status}`);
   const file = createWriteStream(tmp);
   await new Promise((resolveDone, rejectDone) => {
