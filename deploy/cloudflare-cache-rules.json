@@ -5,6 +5,16 @@
   "phase": "http_request_cache_settings",
   "rules": [
     {
+      "ref": "osm_rangefind_mutable_metadata",
+      "description": "Bypass cache for mutable Rangefind manifests and status pages",
+      "expression": "(http.host eq \"osm.rangefind.dev\" and (ends_with(http.request.uri.path, \".json\") or ends_with(http.request.uri.path, \".json.gz\") or ends_with(http.request.uri.path, \".html\")))",
+      "action": "set_cache_settings",
+      "action_parameters": {
+        "cache": false
+      },
+      "enabled": true
+    },
+    {
       "ref": "osm_rangefind_immutable_objects",
       "description": "Cache content-addressed Rangefind objects for one year",
       "expression": "(http.host eq \"osm.rangefind.dev\" and (ends_with(http.request.uri.path, \".bin\") or ends_with(http.request.uri.path, \".bin.gz\")))",

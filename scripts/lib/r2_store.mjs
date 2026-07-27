@@ -99,6 +99,7 @@ function metadataFor(path) {
   if (IMMUTABLE_OBJECT.test(path)) {
     return { ContentType: "application/octet-stream", CacheControl: "public, max-age=31536000, immutable" };
   }
+  if (path.endsWith(".json.gz")) return { ContentType: "application/octet-stream", CacheControl: "no-cache" };
   if (path.endsWith(".json")) return { ContentType: "application/json", CacheControl: "no-cache" };
   if (path.endsWith(".html")) return { ContentType: "text/html; charset=utf-8", CacheControl: "no-cache" };
   return { ContentType: "application/octet-stream" };

@@ -114,6 +114,29 @@ test("uploads files with immutable metadata and the configured key prefix", asyn
   }
 });
 
+test("uploads compressed JSON manifests as mutable metadata", async () => {
+  const commands = [];
+  const client = {
+    send: async command => {
+      commands.push(command);
+      for await (const _chunk of command.input.Body) { /* consume mocked upload */ }
+      return {};
+    },
+    destroy() {}
+  };
+  const directory = mkdtempSync(join(tmpdir(), "r2-store-json-gz-test-"));
+  const file = join(directory, "manifest.json.gz");
+  writeFileSync(file, "compressed");
+  try {
+    const store = createR2Store({ env, client });
+    await store.putFile(file, "shards/quebec/filter-bitmaps/manifest.json.gz");
+    assert.equal(commands[0].input.ContentType, "application/octet-stream");
+    assert.equal(commands[0].input.CacheControl, "no-cache");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("conditional byte uploads forward ETags and expose object metadata", async () => {
   const commands = [];
   const client = {
