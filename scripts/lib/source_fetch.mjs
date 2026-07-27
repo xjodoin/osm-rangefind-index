@@ -14,7 +14,6 @@ export async function fetchSource(
   const timer = setTimeout(() => {
     controller.abort(new Error(`Source request timed out after ${timeout} ms: ${url}`));
   }, timeout);
-  timer.unref?.();
 
   const headers = new Headers(init.headers);
   if (!headers.has("user-agent")) headers.set("user-agent", SOURCE_USER_AGENT);
