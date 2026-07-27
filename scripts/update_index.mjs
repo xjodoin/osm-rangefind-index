@@ -68,6 +68,10 @@ import { extractOsmPlaces } from "rangefind/osm/extract";
 import { createR2Store, listLocalFiles } from "./lib/r2_store.mjs";
 import { acquireProcessLock } from "./lib/process_lock.mjs";
 import { appendStaleObjectPaths } from "./lib/root_artifacts.mjs";
+import {
+  ROOT_ROUTING_ARTIFACTS,
+  rootRoutingArtifactIsPublished
+} from "./lib/root_publish.mjs";
 import { createTaskQueue } from "./lib/serial_task_queue.mjs";
 import { fetchSource } from "./lib/source_fetch.mjs";
 import {
@@ -613,11 +617,23 @@ async function uploadRoot(store, args) {
   // manifests flip keeps R2 consistent at every instant. Old files linger
   // until a --prune run deletes them in S3 batches.
   const staleByPrefix = [];
-  for (const prefix of ["text-routing", "authority"]) {
+  const localManifest = loadJson(join(OUT, "manifest.min.json"), null);
+  let remoteManifest = null;
+  try {
+    remoteManifest = JSON.parse(await store.getText("manifest.min.json"));
+  } catch (error) {
+    log(`Root manifest comparison unavailable (${error.message}) — routing artifacts will be uploaded.`);
+  }
+  for (const { prefix, manifestKey } of ROOT_ROUTING_ARTIFACTS) {
     const dir = join(OUT, prefix);
     if (!existsSync(dir)) continue;
     const files = listLocalFiles(dir);
-    await store.putFiles(files, prefix);
+    if (rootRoutingArtifactIsPublished(localManifest, remoteManifest, manifestKey)) {
+      const bytes = files.reduce((sum, file) => sum + statSync(file.path).size, 0);
+      log(`Root ${prefix}: unchanged — skipped ${files.length.toLocaleString()} file(s), ${(bytes / 1024 / 1024).toFixed(1)} MiB.`);
+    } else {
+      await store.putFiles(files, prefix);
+    }
     if (args?.prune) {
       const keep = new Set(files.map(file => `${prefix}/${file.relative}`));
       appendStaleObjectPaths(
