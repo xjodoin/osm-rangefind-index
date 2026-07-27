@@ -19,14 +19,16 @@
 // Usage:
 //   node scripts/generate_regions.mjs            # verify URLs, write regions.json
 //   node scripts/generate_regions.mjs --no-verify
+//   node scripts/generate_regions.mjs --bboxes-only
 //   node scripts/generate_regions.mjs --dry-run  # print, don't write
 
 import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { geometryCoverageBbox } from "./lib/coverage_bbox.mjs";
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const INDEX_URL = "https://download.geofabrik.de/index-v1-nogeom.json";
+const INDEX_URL = "https://download.geofabrik.de/index-v1.json";
 // Regions with a PBF larger than this and available subregions are split.
 // ~2.5 GiB ≈ 8-15M places — the comfortable single-shard ceiling.
 const EXPAND_PBF_GIB = 2.5;
@@ -54,9 +56,38 @@ const IGNORE_CODE_COLLISIONS = new Set([
 const args = new Set(process.argv.slice(2));
 const verify = !args.has("--no-verify");
 const dryRun = args.has("--dry-run");
+const bboxesOnly = args.has("--bboxes-only");
 
 const index = await (await fetch(INDEX_URL)).json();
 const byId = new Map(index.features.map(f => [f.properties.id, f.properties]));
+const featureById = new Map(index.features.map(feature => [feature.properties.id, feature]));
+const featureByGeofabrik = new Map(index.features.map(feature => [
+  feature.properties.urls?.pbf
+    ?.replace("https://download.geofabrik.de/", "")
+    .replace(/-latest\.osm\.pbf$/u, ""),
+  feature
+]));
+const existing = JSON.parse(readFileSync(join(projectRoot, "regions.json"), "utf8"));
+
+if (bboxesOnly) {
+  const regions = existing.regions.map(region => {
+    const feature = featureByGeofabrik.get(region.geofabrik);
+    const bbox = geometryCoverageBbox(feature?.geometry);
+    if (!feature || !bbox) {
+      throw new Error(`No Geofabrik coverage geometry for ${region.id} (${region.geofabrik}).`);
+    }
+    return { ...region, bbox };
+  });
+  const output = { ...existing, regions };
+  if (dryRun) {
+    console.log(JSON.stringify(output, null, 2));
+  } else {
+    writeFileSync(join(projectRoot, "regions.json"), JSON.stringify(output, null, 2) + "\n");
+    console.log(`regions.json coverage bboxes refreshed (${regions.length} shards).`);
+  }
+  process.exit(0);
+}
+
 const byParent = new Map();
 for (const f of index.features) {
   const p = f.properties;
@@ -156,7 +187,14 @@ const regions = selected
   .map(entry => {
     const pbf = entry.urls?.pbf || "";
     const geofabrik = pbf.replace("https://download.geofabrik.de/", "").replace(/-latest\.osm\.pbf$/u, "");
-    return { entryId: entry.id, id: entry.id.split("/").pop(), geofabrik, name: entry.name, groups: groupsOf(entry) };
+    return {
+      entryId: entry.id,
+      id: entry.id.split("/").pop(),
+      geofabrik,
+      name: entry.name,
+      groups: groupsOf(entry),
+      bbox: geometryCoverageBbox(featureById.get(entry.id)?.geometry)
+    };
   })
   .filter(region => region.geofabrik)
   .sort((a, b) => (a.id < b.id ? -1 : 1));
@@ -208,10 +246,14 @@ if (verify) {
   console.log(`All URLs OK — total download ≈ ${(totalBytes / 1024 ** 3).toFixed(1)} GiB.`);
 }
 
-const existing = JSON.parse(readFileSync(join(projectRoot, "regions.json"), "utf8"));
 const output = {
   "//": existing["//"],
-  regions: regions.map(({ id, geofabrik, groups }) => ({ id, geofabrik, ...(groups.length ? { groups } : {}) })),
+  regions: regions.map(({ id, geofabrik, groups, bbox }) => ({
+    id,
+    geofabrik,
+    ...(groups.length ? { groups } : {}),
+    bbox
+  })),
   statsDriftRatio: existing.statsDriftRatio ?? 0.1,
   workerCount: existing.workerCount ?? 0,
   publisher: existing.publisher ?? "",

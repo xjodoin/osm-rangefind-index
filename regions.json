@@ -1,11 +1,17 @@
 {
-  "//": "Each region becomes one shard. `geofabrik` is the path under https://download.geofabrik.de/ (region id = last path segment). Optional `pbf` pins a local file instead of downloading (useful for tests). Optional `overrides` merges into the shard's rangefind config.",
+  "//": "Each region becomes one shard. `geofabrik` is the path under https://download.geofabrik.de/ (region id = last path segment). `bbox` is official source coverage in [minLat,minLon,maxLat,maxLon] order; minLon > maxLon wraps across the antimeridian. Optional `pbf` pins a local file instead of downloading (useful for tests). Optional `overrides` merges into the shard's rangefind config.",
   "regions": [
     {
       "id": "afghanistan",
       "geofabrik": "asia/afghanistan",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        29.36856,
+        60.48761,
+        38.50674,
+        74.90017
       ]
     },
     {
@@ -14,6 +20,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        29.95494,
+        -88.48389,
+        35.00872,
+        -84.88336
       ]
     },
     {
@@ -22,6 +34,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        49.8089,
+        171.7602,
+        72.98845,
+        -129.7998
       ]
     },
     {
@@ -29,6 +47,12 @@
       "geofabrik": "europe/albania",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        39.62738,
+        18.89648,
+        42.66313,
+        21.06285
       ]
     },
     {
@@ -37,6 +61,12 @@
       "groups": [
         "canada",
         "north-america"
+      ],
+      "bbox": [
+        48.99251,
+        -120.0043,
+        60.00254,
+        -110.0018
       ]
     },
     {
@@ -44,6 +74,12 @@
       "geofabrik": "africa/algeria",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        18.92874,
+        -8.704895,
+        37.77284,
+        12.03598
       ]
     },
     {
@@ -52,6 +88,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        47.41798,
+        6.838921,
+        49.07898,
+        8.235465
       ]
     },
     {
@@ -59,6 +101,12 @@
       "geofabrik": "australia-oceania/american-oceania",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        -17.644,
+        141.6357,
+        22.02463,
+        -160.2799
       ]
     },
     {
@@ -66,6 +114,12 @@
       "geofabrik": "europe/andorra",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        42.4276,
+        1.412368,
+        42.65717,
+        1.787481
       ]
     },
     {
@@ -73,11 +127,23 @@
       "geofabrik": "africa/angola",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -18.06508,
+        10.53848,
+        -4.327925,
+        24.10297
       ]
     },
     {
       "id": "antarctica",
-      "geofabrik": "antarctica"
+      "geofabrik": "antarctica",
+      "bbox": [
+        -90,
+        -180,
+        -60,
+        -180
+      ]
     },
     {
       "id": "aquitaine",
@@ -85,6 +151,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        42.77334,
+        -1.842771,
+        45.71724,
+        1.450577
       ]
     },
     {
@@ -92,6 +164,12 @@
       "geofabrik": "south-america/argentina",
       "groups": [
         "south-america"
+      ],
+      "bbox": [
+        -55.68296,
+        -73.61453,
+        -21.72575,
+        -53.63534
       ]
     },
     {
@@ -100,6 +178,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        31.32659,
+        -114.8224,
+        37.00596,
+        -109.0437
       ]
     },
     {
@@ -108,6 +192,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        33.0038,
+        -94.62217,
+        36.51585,
+        -89.63987
       ]
     },
     {
@@ -115,6 +205,12 @@
       "geofabrik": "asia/armenia",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        38.83743,
+        43.43821,
+        41.31029,
+        46.64262
       ]
     },
     {
@@ -122,6 +218,12 @@
       "geofabrik": "australia-oceania/australia",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        -57.07106,
+        68.13342,
+        -8.809565,
+        169.0016
       ]
     },
     {
@@ -129,6 +231,12 @@
       "geofabrik": "europe/austria",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        46.36979,
+        9.52678,
+        49.02403,
+        17.16408
       ]
     },
     {
@@ -137,6 +245,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        44.6146,
+        2.060519,
+        46.80668,
+        4.492907
       ]
     },
     {
@@ -144,6 +258,12 @@
       "geofabrik": "asia/azerbaijan",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        38.24727,
+        44.75006,
+        42.67437,
+        51.7231
       ]
     },
     {
@@ -151,6 +271,12 @@
       "geofabrik": "europe/azores",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        35.67791,
+        -31.57293,
+        40.0757,
+        -23.71814
       ]
     },
     {
@@ -159,6 +285,12 @@
       "groups": [
         "germany",
         "europe"
+      ],
+      "bbox": [
+        47.53076,
+        7.506494,
+        49.79456,
+        10.51495
       ]
     },
     {
@@ -166,6 +298,12 @@
       "geofabrik": "central-america/bahamas",
       "groups": [
         "central-america"
+      ],
+      "bbox": [
+        20.27251,
+        -81.51857,
+        27.97497,
+        -71.86673
       ]
     },
     {
@@ -173,6 +311,12 @@
       "geofabrik": "asia/bangladesh",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        18.58403,
+        87.99765,
+        26.64677,
+        92.69714
       ]
     },
     {
@@ -181,6 +325,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        48.17802,
+        -2.087526,
+        49.88523,
+        0.979067
       ]
     },
     {
@@ -189,6 +339,12 @@
       "groups": [
         "germany",
         "europe"
+      ],
+      "bbox": [
+        47.26543,
+        8.975186,
+        50.56623,
+        13.84947
       ]
     },
     {
@@ -196,6 +352,12 @@
       "geofabrik": "europe/belarus",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        51.23441,
+        23.1748,
+        56.17385,
+        32.76947
       ]
     },
     {
@@ -203,6 +365,12 @@
       "geofabrik": "europe/belgium",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        49.49489,
+        2.340725,
+        51.59839,
+        6.410265
       ]
     },
     {
@@ -210,6 +378,12 @@
       "geofabrik": "central-america/belize",
       "groups": [
         "central-america"
+      ],
+      "bbox": [
+        15.88308,
+        -89.22892,
+        18.4984,
+        -86.85983
       ]
     },
     {
@@ -217,6 +391,12 @@
       "geofabrik": "africa/benin",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        5.984817,
+        0.761489,
+        12.43658,
+        3.861694
       ]
     },
     {
@@ -225,6 +405,12 @@
       "groups": [
         "germany",
         "europe"
+      ],
+      "bbox": [
+        52.33446,
+        13.08283,
+        52.6783,
+        13.76225
       ]
     },
     {
@@ -232,6 +418,12 @@
       "geofabrik": "asia/bhutan",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        26.6948,
+        88.73917,
+        28.25372,
+        92.13159
       ]
     },
     {
@@ -239,6 +431,12 @@
       "geofabrik": "south-america/bolivia",
       "groups": [
         "south-america"
+      ],
+      "bbox": [
+        -22.92551,
+        -69.65675,
+        -9.63866,
+        -57.43481
       ]
     },
     {
@@ -246,6 +444,12 @@
       "geofabrik": "europe/bosnia-herzegovina",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        42.55239,
+        15.7156,
+        45.27803,
+        19.62639
       ]
     },
     {
@@ -253,6 +457,12 @@
       "geofabrik": "africa/botswana",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -26.91539,
+        19.98745,
+        -17.77403,
+        29.38549
       ]
     },
     {
@@ -261,6 +471,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        46.15484,
+        2.843279,
+        48.40136,
+        5.519965
       ]
     },
     {
@@ -269,6 +485,12 @@
       "groups": [
         "germany",
         "europe"
+      ],
+      "bbox": [
+        51.35252,
+        11.22404,
+        53.5784,
+        14.77481
       ]
     },
     {
@@ -276,6 +498,12 @@
       "geofabrik": "south-america/brazil",
       "groups": [
         "south-america"
+      ],
+      "bbox": [
+        -35.46552,
+        -74.02313,
+        5.522895,
+        -27.67249
       ]
     },
     {
@@ -284,6 +512,12 @@
       "groups": [
         "germany",
         "europe"
+      ],
+      "bbox": [
+        53.01034,
+        8.480959,
+        53.61063,
+        8.991268
       ]
     },
     {
@@ -292,6 +526,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        47.07722,
+        -5.848854,
+        49.40025,
+        -1.014538
       ]
     },
     {
@@ -300,6 +540,12 @@
       "groups": [
         "canada",
         "north-america"
+      ],
+      "bbox": [
+        46.41459,
+        -141.7761,
+        60.00678,
+        -114.049
       ]
     },
     {
@@ -307,6 +553,12 @@
       "geofabrik": "europe/bulgaria",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        41.22681,
+        22.34875,
+        44.21777,
+        29.18819
       ]
     },
     {
@@ -314,6 +566,12 @@
       "geofabrik": "africa/burkina-faso",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        9.384107,
+        -5.527409,
+        15.09271,
+        2.412529
       ]
     },
     {
@@ -321,6 +579,12 @@
       "geofabrik": "africa/burundi",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -4.481328,
+        29.00018,
+        -2.307893,
+        30.85115
       ]
     },
     {
@@ -329,6 +593,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        32.48171,
+        -125.8935,
+        42.01618,
+        -114.1291
       ]
     },
     {
@@ -336,6 +606,12 @@
       "geofabrik": "asia/cambodia",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        8.858092,
+        101.8522,
+        14.71875,
+        107.6397
       ]
     },
     {
@@ -343,6 +619,12 @@
       "geofabrik": "africa/cameroon",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        1.645663,
+        8.33,
+        13.09278,
+        16.20312
       ]
     },
     {
@@ -350,6 +632,12 @@
       "geofabrik": "africa/canary-islands",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        26.36117,
+        -18.92352,
+        30.25648,
+        -12.47875
       ]
     },
     {
@@ -357,6 +645,12 @@
       "geofabrik": "africa/cape-verde",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        14.00485,
+        -26.32379,
+        18.005,
+        -21.39096
       ]
     },
     {
@@ -364,6 +658,12 @@
       "geofabrik": "africa/central-african-republic",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        2.208735,
+        14.40908,
+        11.03264,
+        27.47578
       ]
     },
     {
@@ -371,6 +671,12 @@
       "geofabrik": "russia/central-fed-district",
       "groups": [
         "russia"
+      ],
+      "bbox": [
+        49.50446,
+        30.69976,
+        59.6533,
+        47.67023
       ]
     },
     {
@@ -379,6 +685,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        46.34591,
+        0.051538,
+        48.9423,
+        3.129925
       ]
     },
     {
@@ -386,6 +698,12 @@
       "geofabrik": "africa/chad",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        7.428518,
+        13.40129,
+        23.53793,
+        24.02527
       ]
     },
     {
@@ -394,6 +712,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        47.57553,
+        3.382419,
+        50.17007,
+        5.892182
       ]
     },
     {
@@ -401,6 +725,12 @@
       "geofabrik": "south-america/chile",
       "groups": [
         "south-america"
+      ],
+      "bbox": [
+        -58.45195,
+        -113.2233,
+        -17.45743,
+        -65.5141
       ]
     },
     {
@@ -408,6 +738,12 @@
       "geofabrik": "asia/china",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        14.27437,
+        73.41788,
+        53.65559,
+        134.8036
       ]
     },
     {
@@ -415,6 +751,12 @@
       "geofabrik": "south-america/colombia",
       "groups": [
         "south-america"
+      ],
+      "bbox": [
+        -4.25732,
+        -83.23104,
+        16.41924,
+        -66.81472
       ]
     },
     {
@@ -423,6 +765,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        36.98943,
+        -109.0631,
+        41.00388,
+        -102.0355
       ]
     },
     {
@@ -430,6 +778,12 @@
       "geofabrik": "africa/comores",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -12.969,
+        42.74981,
+        -10.74181,
+        45.59661
       ]
     },
     {
@@ -437,6 +791,12 @@
       "geofabrik": "africa/congo-brazzaville",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -5.195885,
+        10.94417,
+        3.740932,
+        18.66783
       ]
     },
     {
@@ -444,6 +804,12 @@
       "geofabrik": "africa/congo-democratic-republic",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -13.5006,
+        11.88343,
+        5.401396,
+        31.33569
       ]
     },
     {
@@ -452,6 +818,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        40.96401,
+        -73.72889,
+        42.05229,
+        -71.7853
       ]
     },
     {
@@ -459,6 +831,12 @@
       "geofabrik": "australia-oceania/cook-islands",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        -25.28867,
+        -168.4661,
+        -5.800506,
+        -154.8056
       ]
     },
     {
@@ -467,6 +845,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        41.31103,
+        8.317882,
+        43.16589,
+        9.751243
       ]
     },
     {
@@ -474,6 +858,12 @@
       "geofabrik": "central-america/costa-rica",
       "groups": [
         "central-america"
+      ],
+      "bbox": [
+        4.937746,
+        -87.82473,
+        11.2237,
+        -82.34952
       ]
     },
     {
@@ -481,6 +871,12 @@
       "geofabrik": "russia/crimean-fed-district",
       "groups": [
         "russia"
+      ],
+      "bbox": [
+        44.13411,
+        32.15053,
+        46.28118,
+        36.68355
       ]
     },
     {
@@ -488,6 +884,12 @@
       "geofabrik": "europe/croatia",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        42.16483,
+        13.08916,
+        46.55756,
+        19.45997
       ]
     },
     {
@@ -495,6 +897,12 @@
       "geofabrik": "central-america/cuba",
       "groups": [
         "central-america"
+      ],
+      "bbox": [
+        19.2533,
+        -85.4242,
+        23.60427,
+        -73.70831
       ]
     },
     {
@@ -502,6 +910,12 @@
       "geofabrik": "europe/cyprus",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        34.23374,
+        31.95244,
+        36.00323,
+        34.96147
       ]
     },
     {
@@ -509,6 +923,12 @@
       "geofabrik": "europe/czech-republic",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        48.54292,
+        12.08477,
+        51.06426,
+        18.86321
       ]
     },
     {
@@ -517,6 +937,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        38.45043,
+        -75.78974,
+        39.84262,
+        -74.98401
       ]
     },
     {
@@ -524,6 +950,12 @@
       "geofabrik": "europe/denmark",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        54.44065,
+        7.7011,
+        58.06239,
+        15.65449
       ]
     },
     {
@@ -532,6 +964,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        38.79099,
+        -77.1201,
+        38.99603,
+        -76.90906
       ]
     },
     {
@@ -539,6 +977,12 @@
       "geofabrik": "africa/djibouti",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        10.88824,
+        41.76177,
+        12.82615,
+        43.84569
       ]
     },
     {
@@ -546,6 +990,12 @@
       "geofabrik": "asia/east-timor",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        -9.690103,
+        123.7912,
+        -8.057869,
+        127.5911
       ]
     },
     {
@@ -553,6 +1003,12 @@
       "geofabrik": "south-america/ecuador",
       "groups": [
         "south-america"
+      ],
+      "bbox": [
+        -5.024173,
+        -93.56487,
+        2.843487,
+        -75.16149
       ]
     },
     {
@@ -560,6 +1016,12 @@
       "geofabrik": "africa/egypt",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        21.9838,
+        24.62628,
+        32.52518,
+        37.16263
       ]
     },
     {
@@ -567,6 +1029,12 @@
       "geofabrik": "central-america/el-salvador",
       "groups": [
         "central-america"
+      ],
+      "bbox": [
+        12.03598,
+        -90.50091,
+        14.45762,
+        -87.58438
       ]
     },
     {
@@ -574,6 +1042,12 @@
       "geofabrik": "africa/equatorial-guinea",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -1.792669,
+        5.165631,
+        4.147134,
+        11.42338
       ]
     },
     {
@@ -581,6 +1055,12 @@
       "geofabrik": "africa/eritrea",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        12.34385,
+        36.4207,
+        18.32962,
+        43.33233
       ]
     },
     {
@@ -588,6 +1068,12 @@
       "geofabrik": "europe/estonia",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        57.49764,
+        20.85166,
+        59.99705,
+        28.21426
       ]
     },
     {
@@ -595,6 +1081,12 @@
       "geofabrik": "africa/ethiopia",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        3.389192,
+        32.96722,
+        14.91626,
+        48.00545
       ]
     },
     {
@@ -602,6 +1094,12 @@
       "geofabrik": "russia/far-eastern-fed-district",
       "groups": [
         "russia"
+      ],
+      "bbox": [
+        37.34659,
+        105.4219,
+        82.00023,
+        -168.6841
       ]
     },
     {
@@ -609,6 +1107,12 @@
       "geofabrik": "europe/faroe-islands",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        60.86632,
+        -8.690197,
+        62.90523,
+        -5.515148
       ]
     },
     {
@@ -616,6 +1120,12 @@
       "geofabrik": "australia-oceania/fiji",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        -25.08127,
+        172.7647,
+        -9.783321,
+        -176.2675
       ]
     },
     {
@@ -623,6 +1133,12 @@
       "geofabrik": "europe/finland",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        59.28783,
+        19.02427,
+        70.09959,
+        31.6159
       ]
     },
     {
@@ -631,6 +1147,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        24.20031,
+        -88.46896,
+        31.00307,
+        -79.43702
       ]
     },
     {
@@ -639,6 +1161,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        46.25975,
+        5.25076,
+        48.02537,
+        7.14439
       ]
     },
     {
@@ -646,6 +1174,12 @@
       "geofabrik": "africa/gabon",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -5.995799,
+        7.389727,
+        2.325716,
+        14.55139
       ]
     },
     {
@@ -653,6 +1187,12 @@
       "geofabrik": "asia/gcc-states",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        15.24752,
+        34.43489,
+        32.19653,
+        60.94748
       ]
     },
     {
@@ -660,6 +1200,12 @@
       "geofabrik": "europe/georgia",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        41.05117,
+        39.88093,
+        43.5899,
+        46.73959
       ]
     },
     {
@@ -668,6 +1214,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        30.35365,
+        -85.6068,
+        35.00356,
+        -80.74313
       ]
     },
     {
@@ -675,6 +1227,12 @@
       "geofabrik": "africa/ghana",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        3.704056,
+        -3.807399,
+        11.17772,
+        1.394038
       ]
     },
     {
@@ -682,6 +1240,12 @@
       "geofabrik": "europe/great-britain",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        49.523,
+        -14.9907,
+        61.13564,
+        2.513672
       ]
     },
     {
@@ -689,6 +1253,12 @@
       "geofabrik": "europe/greece",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        34.59111,
+        18.97064,
+        41.74954,
+        29.65683
       ]
     },
     {
@@ -696,6 +1266,12 @@
       "geofabrik": "north-america/greenland",
       "groups": [
         "north-america"
+      ],
+      "bbox": [
+        58.67169,
+        -75.3894,
+        84.44358,
+        -9.454384
       ]
     },
     {
@@ -704,6 +1280,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        15.49074,
+        -62.15241,
+        16.82426,
+        -60.60471
       ]
     },
     {
@@ -711,6 +1293,12 @@
       "geofabrik": "central-america/guatemala",
       "groups": [
         "central-america"
+      ],
+      "bbox": [
+        12.74168,
+        -92.73303,
+        17.83533,
+        -87.95177
       ]
     },
     {
@@ -718,6 +1306,12 @@
       "geofabrik": "europe/guernsey-jersey",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        49.00381,
+        -3.573306,
+        50.06948,
+        -1.791572
       ]
     },
     {
@@ -725,6 +1319,12 @@
       "geofabrik": "africa/guinea",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        7.183332,
+        -16.85708,
+        12.68322,
+        -7.627259
       ]
     },
     {
@@ -732,6 +1332,12 @@
       "geofabrik": "africa/guinea-bissau",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        10.14494,
+        -16.96427,
+        12.6936,
+        -13.62923
       ]
     },
     {
@@ -739,6 +1345,12 @@
       "geofabrik": "south-america/guyana",
       "groups": [
         "south-america"
+      ],
+      "bbox": [
+        1.149369,
+        -61.42101,
+        9.182536,
+        -56.42321
       ]
     },
     {
@@ -747,6 +1359,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        2.093117,
+        -54.62299,
+        6.370288,
+        -50.8667
       ]
     },
     {
@@ -754,6 +1372,12 @@
       "geofabrik": "central-america/haiti-and-domrep",
       "groups": [
         "central-america"
+      ],
+      "bbox": [
+        16.99901,
+        -74.82529,
+        21.45307,
+        -68.05482
       ]
     },
     {
@@ -762,6 +1386,12 @@
       "groups": [
         "germany",
         "europe"
+      ],
+      "bbox": [
+        53.39183,
+        7.967833,
+        54.06261,
+        10.33196
       ]
     },
     {
@@ -770,6 +1400,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        48.66574,
+        0.009482,
+        50.08769,
+        1.803956
       ]
     },
     {
@@ -778,6 +1414,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        15.92097,
+        -179.5994,
+        29.02109,
+        -142.6511
       ]
     },
     {
@@ -786,6 +1428,12 @@
       "groups": [
         "germany",
         "europe"
+      ],
+      "bbox": [
+        49.39321,
+        7.768021,
+        51.65916,
+        10.24595
       ]
     },
     {
@@ -793,6 +1441,12 @@
       "geofabrik": "central-america/honduras",
       "groups": [
         "central-america"
+      ],
+      "bbox": [
+        12.96943,
+        -89.36005,
+        17.93171,
+        -81.66138
       ]
     },
     {
@@ -800,6 +1454,12 @@
       "geofabrik": "europe/hungary",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        45.73207,
+        16.10845,
+        48.58921,
+        22.90649
       ]
     },
     {
@@ -807,6 +1467,12 @@
       "geofabrik": "europe/iceland",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        62.84553,
+        -25.7,
+        67.50085,
+        -12.41708
       ]
     },
     {
@@ -815,6 +1481,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        41.98306,
+        -117.246,
+        49.00819,
+        -111.0431
       ]
     },
     {
@@ -822,6 +1494,12 @@
       "geofabrik": "australia-oceania/ile-de-clipperton",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        9.595339,
+        -110.1215,
+        11.15685,
+        -108.3746
       ]
     },
     {
@@ -830,6 +1508,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        48.11918,
+        1.445097,
+        49.24271,
+        3.560409
       ]
     },
     {
@@ -838,6 +1522,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        36.96731,
+        -91.51608,
+        42.50941,
+        -87.49264
       ]
     },
     {
@@ -845,6 +1535,12 @@
       "geofabrik": "asia/india",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        5.896067,
+        67.67457,
+        35.73091,
+        97.41989
       ]
     },
     {
@@ -853,6 +1549,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        37.76911,
+        -88.10327,
+        41.76301,
+        -84.78042
       ]
     },
     {
@@ -860,6 +1562,12 @@
       "geofabrik": "asia/indonesia",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        -11.60655,
+        92.76481,
+        6.99933,
+        141.0217
       ]
     },
     {
@@ -868,6 +1576,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        40.37266,
+        -96.6426,
+        43.50182,
+        -90.13581
       ]
     },
     {
@@ -875,6 +1589,12 @@
       "geofabrik": "asia/iran",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        24.03947,
+        44.02303,
+        39.79045,
+        63.35413
       ]
     },
     {
@@ -882,6 +1602,12 @@
       "geofabrik": "asia/iraq",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        29.01775,
+        38.784,
+        37.39063,
+        49.55108
       ]
     },
     {
@@ -889,6 +1615,12 @@
       "geofabrik": "europe/ireland-and-northern-ireland",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        49.60002,
+        -14.40224,
+        56.86553,
+        -5.059265
       ]
     },
     {
@@ -896,6 +1628,12 @@
       "geofabrik": "europe/isle-of-man",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        53.73236,
+        -5.434554,
+        54.6706,
+        -3.688718
       ]
     },
     {
@@ -903,6 +1641,12 @@
       "geofabrik": "asia/israel-and-palestine",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        29.4396,
+        33.99994,
+        33.45436,
+        35.91531
       ]
     },
     {
@@ -910,6 +1654,12 @@
       "geofabrik": "europe/italy",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        35.07638,
+        6.602696,
+        47.10005,
+        19.12499
       ]
     },
     {
@@ -917,6 +1667,12 @@
       "geofabrik": "africa/ivory-coast",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        4.141916,
+        -8.633881,
+        10.75034,
+        -2.476215
       ]
     },
     {
@@ -924,6 +1680,12 @@
       "geofabrik": "central-america/jamaica",
       "groups": [
         "central-america"
+      ],
+      "bbox": [
+        16.35,
+        -78.85,
+        19.16,
+        -75.51
       ]
     },
     {
@@ -931,6 +1693,12 @@
       "geofabrik": "asia/japan",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        20.08228,
+        122.5607,
+        45.8154,
+        154.4709
       ]
     },
     {
@@ -938,6 +1706,12 @@
       "geofabrik": "asia/jordan",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        29.18213,
+        34.86886,
+        33.37922,
+        39.31022
       ]
     },
     {
@@ -945,6 +1719,12 @@
       "geofabrik": "russia/kaliningrad",
       "groups": [
         "russia"
+      ],
+      "bbox": [
+        54.31723,
+        19.40837,
+        55.3899,
+        22.88747
       ]
     },
     {
@@ -953,6 +1733,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        36.99136,
+        -102.0535,
+        40.00375,
+        -94.58926
       ]
     },
     {
@@ -960,6 +1746,12 @@
       "geofabrik": "asia/kazakhstan",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        40.55346,
+        46.42304,
+        55.50799,
+        87.35359
       ]
     },
     {
@@ -968,6 +1760,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        36.49325,
+        -89.58125,
+        39.14831,
+        -81.95512
       ]
     },
     {
@@ -975,6 +1773,12 @@
       "geofabrik": "africa/kenya",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -4.816276,
+        33.8679,
+        4.629931,
+        41.97685
       ]
     },
     {
@@ -982,6 +1786,12 @@
       "geofabrik": "australia-oceania/kiribati",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        -13.83833,
+        167.8684,
+        6.472283,
+        -147.0336
       ]
     },
     {
@@ -989,6 +1799,12 @@
       "geofabrik": "europe/kosovo",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        41.85408,
+        20.01357,
+        43.27753,
+        21.79327
       ]
     },
     {
@@ -996,6 +1812,12 @@
       "geofabrik": "asia/kyrgyzstan",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        39.15136,
+        69.25507,
+        43.2812,
+        80.2771
       ]
     },
     {
@@ -1004,6 +1826,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        42.32755,
+        1.686256,
+        44.97821,
+        4.847979
       ]
     },
     {
@@ -1011,6 +1839,12 @@
       "geofabrik": "asia/laos",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        13.90159,
+        100.0828,
+        22.52825,
+        107.6503
       ]
     },
     {
@@ -1018,6 +1852,12 @@
       "geofabrik": "europe/latvia",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        55.66109,
+        19.73348,
+        58.0947,
+        28.25501
       ]
     },
     {
@@ -1025,6 +1865,12 @@
       "geofabrik": "asia/lebanon",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        33.05299,
+        34.76799,
+        34.80253,
+        36.63666
       ]
     },
     {
@@ -1032,6 +1878,12 @@
       "geofabrik": "africa/lesotho",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -30.68472,
+        27.0092,
+        -28.56734,
+        29.46393
       ]
     },
     {
@@ -1039,6 +1891,12 @@
       "geofabrik": "africa/liberia",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -0.681003,
+        -14.95454,
+        8.570158,
+        -7.24572
       ]
     },
     {
@@ -1046,6 +1904,12 @@
       "geofabrik": "africa/libya",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        19.45087,
+        9.374405,
+        33.57972,
+        25.40726
       ]
     },
     {
@@ -1053,6 +1917,12 @@
       "geofabrik": "europe/liechtenstein",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        47.04774,
+        9.471078,
+        47.27128,
+        9.636217
       ]
     },
     {
@@ -1061,6 +1931,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        44.91842,
+        0.627097,
+        46.45781,
+        2.61384
       ]
     },
     {
@@ -1068,6 +1944,12 @@
       "geofabrik": "europe/lithuania",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        53.89221,
+        20.61859,
+        56.45329,
+        26.83873
       ]
     },
     {
@@ -1076,6 +1958,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        47.81188,
+        4.886022,
+        49.61946,
+        7.640105
       ]
     },
     {
@@ -1084,6 +1972,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        28.14452,
+        -94.04376,
+        33.02025,
+        -88.66684
       ]
     },
     {
@@ -1091,6 +1985,12 @@
       "geofabrik": "europe/luxembourg",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        49.44553,
+        5.733033,
+        50.18496,
+        6.532249
       ]
     },
     {
@@ -1098,6 +1998,12 @@
       "geofabrik": "europe/macedonia",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        40.84759,
+        20.44671,
+        42.37969,
+        23.04012
       ]
     },
     {
@@ -1105,6 +2011,12 @@
       "geofabrik": "africa/madagascar",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -26.5823,
+        42.30124,
+        -11.02746,
+        51.14843
       ]
     },
     {
@@ -1113,6 +2025,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        42.85443,
+        -71.08891,
+        47.46222,
+        -66.87164
       ]
     },
     {
@@ -1120,6 +2038,12 @@
       "geofabrik": "africa/malawi",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -17.13324,
+        32.66441,
+        -9.362691,
+        35.92941
       ]
     },
     {
@@ -1127,6 +2051,12 @@
       "geofabrik": "asia/malaysia-singapore-brunei",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        0.830813,
+        99.25611,
+        7.736849,
+        119.6683
       ]
     },
     {
@@ -1134,6 +2064,12 @@
       "geofabrik": "asia/maldives",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        -1.36,
+        71.7,
+        7.69,
+        74.5
       ]
     },
     {
@@ -1141,6 +2077,12 @@
       "geofabrik": "africa/mali",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        10.1176,
+        -12.24701,
+        25.09499,
+        4.330257
       ]
     },
     {
@@ -1148,6 +2090,12 @@
       "geofabrik": "europe/malta",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        35.51985,
+        14,
+        36.33296,
+        14.8561
       ]
     },
     {
@@ -1156,6 +2104,12 @@
       "groups": [
         "canada",
         "north-america"
+      ],
+      "bbox": [
+        48.99056,
+        -102.014,
+        60.00845,
+        -88.12183
       ]
     },
     {
@@ -1163,6 +2117,12 @@
       "geofabrik": "australia-oceania/marshall-islands",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        1.777314,
+        156.8453,
+        17.94606,
+        175.5118
       ]
     },
     {
@@ -1171,6 +2131,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        14.13392,
+        -61.63056,
+        15.15167,
+        -60.42755
       ]
     },
     {
@@ -1179,6 +2145,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        37.88396,
+        -79.48857,
+        39.72684,
+        -74.95408
       ]
     },
     {
@@ -1187,6 +2159,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        40.88291,
+        -73.51096,
+        42.88768,
+        -68.73438
       ]
     },
     {
@@ -1194,6 +2172,12 @@
       "geofabrik": "africa/mauritania",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        14.71578,
+        -17.35016,
+        27.33613,
+        -4.816056
       ]
     },
     {
@@ -1201,6 +2185,12 @@
       "geofabrik": "africa/mauritius",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -22.2411,
+        53.54727,
+        -9.183617,
+        64.66991
       ]
     },
     {
@@ -1209,6 +2199,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        -13.47243,
+        44.62646,
+        -12.14406,
+        45.6784
       ]
     },
     {
@@ -1217,6 +2213,12 @@
       "groups": [
         "germany",
         "europe"
+      ],
+      "bbox": [
+        53.10619,
+        10.58807,
+        54.9837,
+        14.42292
       ]
     },
     {
@@ -1224,6 +2226,12 @@
       "geofabrik": "north-america/mexico",
       "groups": [
         "north-america"
+      ],
+      "bbox": [
+        9.456709,
+        -132.4952,
+        32.72067,
+        -85.49087
       ]
     },
     {
@@ -1232,6 +2240,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        41.69439,
+        -90.41981,
+        48.35021,
+        -82.06913
       ]
     },
     {
@@ -1239,6 +2253,12 @@
       "geofabrik": "australia-oceania/micronesia",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        -1.147444,
+        135.3124,
+        13.21917,
+        165.6345
       ]
     },
     {
@@ -1247,6 +2267,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        42.56793,
+        -0.327537,
+        45.04779,
+        3.453264
       ]
     },
     {
@@ -1255,6 +2281,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        43.49909,
+        -97.24987,
+        49.40714,
+        -89.48612
       ]
     },
     {
@@ -1263,6 +2295,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        30.04168,
+        -91.65857,
+        35.00055,
+        -88.09292
       ]
     },
     {
@@ -1271,6 +2309,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        35.99466,
+        -95.77751,
+        40.61664,
+        -89.0891
       ]
     },
     {
@@ -1278,6 +2322,12 @@
       "geofabrik": "europe/moldova",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        45.46164,
+        26.61232,
+        48.49397,
+        30.19249
       ]
     },
     {
@@ -1285,6 +2335,12 @@
       "geofabrik": "europe/monaco",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        43.48382,
+        7.408583,
+        43.75293,
+        7.595671
       ]
     },
     {
@@ -1292,6 +2348,12 @@
       "geofabrik": "asia/mongolia",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        41.50035,
+        87.70255,
+        52.19582,
+        120.0201
       ]
     },
     {
@@ -1300,6 +2362,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        44.35556,
+        -116.0518,
+        49.00769,
+        -104.0355
       ]
     },
     {
@@ -1307,6 +2375,12 @@
       "geofabrik": "europe/montenegro",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        41.61621,
+        18.17282,
+        43.56217,
+        20.35883
       ]
     },
     {
@@ -1314,6 +2388,12 @@
       "geofabrik": "africa/morocco",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        20.40373,
+        -18.1835,
+        36.06077,
+        -0.993576
       ]
     },
     {
@@ -1321,6 +2401,12 @@
       "geofabrik": "africa/mozambique",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -26.93837,
+        30.20742,
+        -9.986206,
+        42.53489
       ]
     },
     {
@@ -1328,6 +2414,12 @@
       "geofabrik": "asia/myanmar",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        9.510211,
+        90.65133,
+        28.57476,
+        101.1971
       ]
     },
     {
@@ -1335,6 +2427,12 @@
       "geofabrik": "africa/namibia",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -30.20686,
+        9.784615,
+        -16.91682,
+        25.26589
       ]
     },
     {
@@ -1342,6 +2440,12 @@
       "geofabrik": "australia-oceania/nauru",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        -3.771196,
+        163.7052,
+        2.693851,
+        168.5599
       ]
     },
     {
@@ -1350,6 +2454,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        40.00015,
+        -104.0575,
+        43.00172,
+        -95.30703
       ]
     },
     {
@@ -1357,6 +2467,12 @@
       "geofabrik": "asia/nepal",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        26.3445,
+        80.04913,
+        30.47822,
+        88.22213
       ]
     },
     {
@@ -1364,6 +2480,12 @@
       "geofabrik": "europe/netherlands",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        50.74753,
+        2.936095,
+        54.01786,
+        7.230455
       ]
     },
     {
@@ -1372,6 +2494,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        35.00053,
+        -120.0074,
+        42.00391,
+        -114.0379
       ]
     },
     {
@@ -1380,6 +2508,12 @@
       "groups": [
         "canada",
         "north-america"
+      ],
+      "bbox": [
+        44.19205,
+        -69.05975,
+        48.38075,
+        -62.88575
       ]
     },
     {
@@ -1387,6 +2521,12 @@
       "geofabrik": "australia-oceania/new-caledonia",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        -25,
+        157.9,
+        -16.9,
+        174.1
       ]
     },
     {
@@ -1395,6 +2535,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        42.69669,
+        -72.5588,
+        45.31002,
+        -70.48692
       ]
     },
     {
@@ -1403,6 +2549,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        38.75433,
+        -75.57879,
+        41.35807,
+        -73.67898
       ]
     },
     {
@@ -1411,6 +2563,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        31.33043,
+        -109.0504,
+        37.00184,
+        -102.9979
       ]
     },
     {
@@ -1419,6 +2577,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        40.43922,
+        -79.76483,
+        45.01766,
+        -71.6608
       ]
     },
     {
@@ -1426,6 +2590,12 @@
       "geofabrik": "australia-oceania/new-zealand",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        -56.75268,
+        162.096,
+        -28.488,
+        -173.5849
       ]
     },
     {
@@ -1434,6 +2604,12 @@
       "groups": [
         "canada",
         "north-america"
+      ],
+      "bbox": [
+        44.45787,
+        -67.87079,
+        60.50864,
+        -44.17684
       ]
     },
     {
@@ -1441,6 +2617,12 @@
       "geofabrik": "central-america/nicaragua",
       "groups": [
         "central-america"
+      ],
+      "bbox": [
+        10.70177,
+        -87.9774,
+        15.1119,
+        -82.37865
       ]
     },
     {
@@ -1449,6 +2631,12 @@
       "groups": [
         "germany",
         "europe"
+      ],
+      "bbox": [
+        51.29348,
+        6.295338,
+        54.23955,
+        11.60731
       ]
     },
     {
@@ -1456,6 +2644,12 @@
       "geofabrik": "africa/niger",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        11.68684,
+        0.119721,
+        23.56864,
+        16.05605
       ]
     },
     {
@@ -1463,6 +2657,12 @@
       "geofabrik": "africa/nigeria",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        2.674022,
+        2.664528,
+        13.89874,
+        14.68057
       ]
     },
     {
@@ -1470,6 +2670,12 @@
       "geofabrik": "australia-oceania/niue",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        -22.47347,
+        -172.027,
+        -16.63667,
+        -166.2989
       ]
     },
     {
@@ -1478,6 +2684,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        49.96764,
+        1.278311,
+        51.28121,
+        4.236622
       ]
     },
     {
@@ -1486,6 +2698,12 @@
       "groups": [
         "germany",
         "europe"
+      ],
+      "bbox": [
+        50.32088,
+        5.864417,
+        52.53345,
+        9.468311
       ]
     },
     {
@@ -1494,6 +2712,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        33.12992,
+        -84.32219,
+        36.58979,
+        -73.7396
       ]
     },
     {
@@ -1501,6 +2725,12 @@
       "geofabrik": "russia/north-caucasus-fed-district",
       "groups": [
         "russia"
+      ],
+      "bbox": [
+        41.1355,
+        40.67265,
+        46.23914,
+        48.86453
       ]
     },
     {
@@ -1509,6 +2739,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        45.93448,
+        -104.053,
+        49.01671,
+        -96.55292
       ]
     },
     {
@@ -1516,6 +2752,12 @@
       "geofabrik": "asia/north-korea",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        37.61103,
+        123.697,
+        43.02043,
+        131.6447
       ]
     },
     {
@@ -1524,6 +2766,12 @@
       "groups": [
         "canada",
         "north-america"
+      ],
+      "bbox": [
+        59.9896,
+        -136.6974,
+        81.65483,
+        -101.976
       ]
     },
     {
@@ -1531,6 +2779,12 @@
       "geofabrik": "russia/northwestern-fed-district",
       "groups": [
         "russia"
+      ],
+      "bbox": [
+        54.31282,
+        19.40837,
+        82.54561,
+        72.62481
       ]
     },
     {
@@ -1538,6 +2792,12 @@
       "geofabrik": "europe/norway",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        57.55323,
+        -11.36801,
+        81.05195,
+        35.52711
       ]
     },
     {
@@ -1546,6 +2806,12 @@
       "groups": [
         "canada",
         "north-america"
+      ],
+      "bbox": [
+        42.10691,
+        -67.24728,
+        47.89793,
+        -58.22593
       ]
     },
     {
@@ -1554,6 +2820,12 @@
       "groups": [
         "canada",
         "north-america"
+      ],
+      "bbox": [
+        51.1268,
+        -120.737,
+        84.95198,
+        -53.26943
       ]
     },
     {
@@ -1562,6 +2834,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        38.40076,
+        -84.8219,
+        42.33584,
+        -80.50521
       ]
     },
     {
@@ -1570,6 +2848,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        33.61348,
+        -103.0078,
+        37.00529,
+        -94.42989
       ]
     },
     {
@@ -1578,6 +2862,12 @@
       "groups": [
         "canada",
         "north-america"
+      ],
+      "bbox": [
+        41.66009,
+        -95.15965,
+        57.50826,
+        -74.30998
       ]
     },
     {
@@ -1586,6 +2876,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        41.9634,
+        -126.3879,
+        46.30349,
+        -116.4545
       ]
     },
     {
@@ -1593,6 +2889,12 @@
       "geofabrik": "asia/pakistan",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        23.3763,
+        60.82168,
+        37.10667,
+        77.22427
       ]
     },
     {
@@ -1600,6 +2902,12 @@
       "geofabrik": "australia-oceania/palau",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        1.621407,
+        130.1034,
+        11.48818,
+        136.9541
       ]
     },
     {
@@ -1607,6 +2915,12 @@
       "geofabrik": "central-america/panama",
       "groups": [
         "central-america"
+      ],
+      "bbox": [
+        6.644027,
+        -83.46462,
+        11.20708,
+        -77.08126
       ]
     },
     {
@@ -1614,6 +2928,12 @@
       "geofabrik": "australia-oceania/papua-new-guinea",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        -14.74845,
+        139.2014,
+        2.587814,
+        162.8034
       ]
     },
     {
@@ -1621,6 +2941,12 @@
       "geofabrik": "south-america/paraguay",
       "groups": [
         "south-america"
+      ],
+      "bbox": [
+        -27.65675,
+        -62.69475,
+        -19.24012,
+        -54.20176
       ]
     },
     {
@@ -1629,6 +2955,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        46.21875,
+        -2.674666,
+        48.57002,
+        0.918996
       ]
     },
     {
@@ -1637,6 +2969,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        39.6644,
+        -80.52275,
+        42.51649,
+        -74.68761
       ]
     },
     {
@@ -1644,6 +2982,12 @@
       "geofabrik": "south-america/peru",
       "groups": [
         "south-america"
+      ],
+      "bbox": [
+        -20.30552,
+        -86.02509,
+        0.060049,
+        -68.55439
       ]
     },
     {
@@ -1651,6 +2995,12 @@
       "geofabrik": "asia/philippines",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        4.382696,
+        112.1661,
+        21.53021,
+        127.0742
       ]
     },
     {
@@ -1659,6 +3009,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        48.83599,
+        1.360085,
+        50.37125,
+        4.256744
       ]
     },
     {
@@ -1666,6 +3022,12 @@
       "geofabrik": "australia-oceania/pitcairn-islands",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        -27.66403,
+        -133.0664,
+        -21.59613,
+        -118.3448
       ]
     },
     {
@@ -1674,6 +3036,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        45.0868,
+        -1.898565,
+        47.17837,
+        1.214991
       ]
     },
     {
@@ -1681,6 +3049,12 @@
       "geofabrik": "europe/poland",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        48.98642,
+        13.99022,
+        55.22826,
+        24.16102
       ]
     },
     {
@@ -1688,6 +3062,12 @@
       "geofabrik": "australia-oceania/polynesie-francaise",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        -31.54105,
+        -158.5547,
+        -4.915789,
+        -132.5391
       ]
     },
     {
@@ -1695,6 +3075,12 @@
       "geofabrik": "europe/portugal",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        32,
+        -31.6,
+        42.1639,
+        -6.179513
       ]
     },
     {
@@ -1703,6 +3089,12 @@
       "groups": [
         "canada",
         "north-america"
+      ],
+      "bbox": [
+        45.82497,
+        -64.60236,
+        47.68573,
+        -61.24878
       ]
     },
     {
@@ -1711,6 +3103,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        42.31539,
+        4.144746,
+        45.12887,
+        7.748528
       ]
     },
     {
@@ -1719,6 +3117,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        17.51573,
+        -68.31024,
+        18.81272,
+        -65.09262
       ]
     },
     {
@@ -1727,6 +3131,12 @@
       "groups": [
         "canada",
         "north-america"
+      ],
+      "bbox": [
+        44.98552,
+        -79.8404,
+        62.6262,
+        -57.08908
       ]
     },
     {
@@ -1735,6 +3145,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        -21.72922,
+        54.94688,
+        -20.58589,
+        56.11999
       ]
     },
     {
@@ -1743,6 +3159,12 @@
       "groups": [
         "germany",
         "europe"
+      ],
+      "bbox": [
+        48.96377,
+        6.109129,
+        50.94404,
+        8.511228
       ]
     },
     {
@@ -1751,6 +3173,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        40.9992,
+        -71.91456,
+        42.01938,
+        -71.06369
       ]
     },
     {
@@ -1759,6 +3187,12 @@
       "groups": [
         "france",
         "europe"
+      ],
+      "bbox": [
+        44.11274,
+        3.686075,
+        46.52248,
+        7.19206
       ]
     },
     {
@@ -1766,6 +3200,12 @@
       "geofabrik": "europe/romania",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        43.61247,
+        20.24181,
+        48.26948,
+        30.27896
       ]
     },
     {
@@ -1773,6 +3213,12 @@
       "geofabrik": "africa/rwanda",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -2.848747,
+        28.8593,
+        -1.03831,
+        30.90864
       ]
     },
     {
@@ -1781,6 +3227,12 @@
       "groups": [
         "germany",
         "europe"
+      ],
+      "bbox": [
+        49.10807,
+        6.354475,
+        49.64146,
+        7.406287
       ]
     },
     {
@@ -1789,6 +3241,12 @@
       "groups": [
         "germany",
         "europe"
+      ],
+      "bbox": [
+        50.16658,
+        11.86685,
+        51.68735,
+        15.05078
       ]
     },
     {
@@ -1797,6 +3255,12 @@
       "groups": [
         "germany",
         "europe"
+      ],
+      "bbox": [
+        50.92887,
+        10.54725,
+        53.0566,
+        13.21268
       ]
     },
     {
@@ -1804,6 +3268,12 @@
       "geofabrik": "africa/saint-helena-ascension-and-tristan-da-cunha",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -43.83245,
+        -15.57026,
+        -4.591221,
+        -2.781278
       ]
     },
     {
@@ -1811,6 +3281,12 @@
       "geofabrik": "australia-oceania/samoa",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        -15.87838,
+        -174.5114,
+        -10.96083,
+        -170.5427
       ]
     },
     {
@@ -1818,6 +3294,12 @@
       "geofabrik": "africa/sao-tome-and-principe",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -0.525565,
+        5.273916,
+        2.440286,
+        8.366995
       ]
     },
     {
@@ -1826,6 +3308,12 @@
       "groups": [
         "canada",
         "north-america"
+      ],
+      "bbox": [
+        48.9876,
+        -110.0069,
+        60.00052,
+        -101.3614
       ]
     },
     {
@@ -1834,6 +3322,12 @@
       "groups": [
         "germany",
         "europe"
+      ],
+      "bbox": [
+        53.3569,
+        7.46458,
+        55.14634,
+        11.79931
       ]
     },
     {
@@ -1841,6 +3335,12 @@
       "geofabrik": "africa/senegal-and-gambia",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        12.01511,
+        -19.85623,
+        16.70088,
+        -11.33595
       ]
     },
     {
@@ -1848,6 +3348,12 @@
       "geofabrik": "europe/serbia",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        42.22979,
+        18.80894,
+        46.19207,
+        23.01035
       ]
     },
     {
@@ -1855,6 +3361,12 @@
       "geofabrik": "africa/seychelles",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -12.55844,
+        45.68495,
+        -3.17239,
+        57.57433
       ]
     },
     {
@@ -1862,6 +3374,12 @@
       "geofabrik": "russia/siberian-fed-district",
       "groups": [
         "russia"
+      ],
+      "bbox": [
+        49.02101,
+        70.27478,
+        81.88747,
+        147.7133
       ]
     },
     {
@@ -1869,6 +3387,12 @@
       "geofabrik": "africa/sierra-leone",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        5.391619,
+        -14.76451,
+        10.00571,
+        -10.2558
       ]
     },
     {
@@ -1876,6 +3400,12 @@
       "geofabrik": "europe/slovakia",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        47.72646,
+        16.83071,
+        49.6186,
+        22.57051
       ]
     },
     {
@@ -1883,6 +3413,12 @@
       "geofabrik": "europe/slovenia",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        45.42081,
+        13.30509,
+        46.87956,
+        16.60034
       ]
     },
     {
@@ -1890,6 +3426,12 @@
       "geofabrik": "australia-oceania/solomon-islands",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        -16.12694,
+        154.5856,
+        -4.139945,
+        173.5934
       ]
     },
     {
@@ -1897,6 +3439,12 @@
       "geofabrik": "africa/somalia",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -1.816753,
+        40.97489,
+        12.51177,
+        52.44871
       ]
     },
     {
@@ -1904,6 +3452,12 @@
       "geofabrik": "africa/south-africa",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -47.58493,
+        15.99606,
+        -22.11736,
+        39.24259
       ]
     },
     {
@@ -1911,6 +3465,12 @@
       "geofabrik": "africa/south-africa-and-lesotho",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -47.58493,
+        15.99606,
+        -22.11736,
+        39.24259
       ]
     },
     {
@@ -1919,6 +3479,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        32.02967,
+        -83.35622,
+        35.2184,
+        -78.51867
       ]
     },
     {
@@ -1927,6 +3493,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        42.47744,
+        -104.0588,
+        45.94831,
+        -96.43595
       ]
     },
     {
@@ -1934,6 +3506,12 @@
       "geofabrik": "russia/south-fed-district",
       "groups": [
         "russia"
+      ],
+      "bbox": [
+        43.18958,
+        36.52315,
+        51.2554,
+        49.93666
       ]
     },
     {
@@ -1941,6 +3519,12 @@
       "geofabrik": "asia/south-korea",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        32.36076,
+        124.3188,
+        38.64966,
+        132.3386
       ]
     },
     {
@@ -1948,6 +3532,12 @@
       "geofabrik": "africa/south-sudan",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        3.461547,
+        23.42491,
+        12.23937,
+        35.96298
       ]
     },
     {
@@ -1955,6 +3545,12 @@
       "geofabrik": "europe/spain",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        35.26393,
+        -9.779014,
+        44.14855,
+        5.098525
       ]
     },
     {
@@ -1962,6 +3558,12 @@
       "geofabrik": "asia/sri-lanka",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        5.621275,
+        79.16416,
+        10.07153,
+        82.64612
       ]
     },
     {
@@ -1969,6 +3571,12 @@
       "geofabrik": "africa/sudan",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        8.653747,
+        21.781,
+        22.34706,
+        39.62781
       ]
     },
     {
@@ -1976,6 +3584,12 @@
       "geofabrik": "south-america/suriname",
       "groups": [
         "south-america"
+      ],
+      "bbox": [
+        1.816773,
+        -58.08461,
+        7.761698,
+        -53.32819
       ]
     },
     {
@@ -1983,6 +3597,12 @@
       "geofabrik": "africa/swaziland",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -27.31826,
+        30.78575,
+        -25.71781,
+        32.13698
       ]
     },
     {
@@ -1990,6 +3610,12 @@
       "geofabrik": "europe/sweden",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        55.02652,
+        10.54138,
+        69.06643,
+        24.22472
       ]
     },
     {
@@ -1997,6 +3623,12 @@
       "geofabrik": "europe/switzerland",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        45.81642,
+        5.954418,
+        47.81126,
+        10.49584
       ]
     },
     {
@@ -2004,6 +3636,12 @@
       "geofabrik": "asia/syria",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        32.3066,
+        35.28548,
+        37.32239,
+        42.38383
       ]
     },
     {
@@ -2011,6 +3649,12 @@
       "geofabrik": "asia/taiwan",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        20.72799,
+        118.1036,
+        26.60305,
+        122.9312
       ]
     },
     {
@@ -2018,6 +3662,12 @@
       "geofabrik": "asia/tajikistan",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        36.66374,
+        67.3201,
+        41.05502,
+        75.16571
       ]
     },
     {
@@ -2025,6 +3675,12 @@
       "geofabrik": "africa/tanzania",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -11.77595,
+        29.24395,
+        -0.974988,
+        40.69487
       ]
     },
     {
@@ -2033,6 +3689,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        34.98269,
+        -90.31329,
+        36.68075,
+        -81.64416
       ]
     },
     {
@@ -2041,6 +3703,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        25.69551,
+        -106.6494,
+        36.52145,
+        -93.01897
       ]
     },
     {
@@ -2048,6 +3716,12 @@
       "geofabrik": "asia/thailand",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        5.597877,
+        97.13562,
+        20.46875,
+        105.6392
       ]
     },
     {
@@ -2056,6 +3730,12 @@
       "groups": [
         "germany",
         "europe"
+      ],
+      "bbox": [
+        50.19971,
+        9.863176,
+        51.65237,
+        12.66106
       ]
     },
     {
@@ -2063,6 +3743,12 @@
       "geofabrik": "africa/togo",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        5.892541,
+        -0.148338,
+        11.14395,
+        1.810942
       ]
     },
     {
@@ -2070,6 +3756,12 @@
       "geofabrik": "australia-oceania/tokelau",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        -11.08137,
+        -176.8579,
+        -6.664586,
+        -167.4097
       ]
     },
     {
@@ -2077,6 +3769,12 @@
       "geofabrik": "australia-oceania/tonga",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        -25.68413,
+        -178.6487,
+        -14.15464,
+        -171.3053
       ]
     },
     {
@@ -2084,6 +3782,12 @@
       "geofabrik": "africa/tunisia",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        30.20864,
+        7.513961,
+        37.77474,
+        12.068
       ]
     },
     {
@@ -2091,6 +3795,12 @@
       "geofabrik": "europe/turkey",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        35.717,
+        25.52398,
+        43.07481,
+        44.85992
       ]
     },
     {
@@ -2098,6 +3808,12 @@
       "geofabrik": "asia/turkmenistan",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        35.12355,
+        51.83271,
+        42.81253,
+        66.72272
       ]
     },
     {
@@ -2105,6 +3821,12 @@
       "geofabrik": "australia-oceania/tuvalu",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        -13.24039,
+        172.9953,
+        -4.061646,
+        -176.757
       ]
     },
     {
@@ -2112,6 +3834,12 @@
       "geofabrik": "africa/uganda",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -1.487315,
+        29.57056,
+        4.250552,
+        35.01031
       ]
     },
     {
@@ -2119,6 +3847,12 @@
       "geofabrik": "europe/ukraine",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        44.00862,
+        22.13264,
+        52.3865,
+        40.23811
       ]
     },
     {
@@ -2126,6 +3860,12 @@
       "geofabrik": "europe/united-kingdom",
       "groups": [
         "europe"
+      ],
+      "bbox": [
+        49.4192,
+        -14.8585,
+        61.13564,
+        2.641786
       ]
     },
     {
@@ -2133,6 +3873,12 @@
       "geofabrik": "russia/ural-fed-district",
       "groups": [
         "russia"
+      ],
+      "bbox": [
+        51.8264,
+        57.04259,
+        75.011,
+        86.0952
       ]
     },
     {
@@ -2140,6 +3886,12 @@
       "geofabrik": "south-america/uruguay",
       "groups": [
         "south-america"
+      ],
+      "bbox": [
+        -36.2487,
+        -58.52589,
+        -30.07355,
+        -52.7723
       ]
     },
     {
@@ -2148,6 +3900,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        17.28246,
+        -65.17502,
+        18.48596,
+        -63.95554
       ]
     },
     {
@@ -2156,6 +3914,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        36.9963,
+        -114.0556,
+        42.00323,
+        -109.0394
       ]
     },
     {
@@ -2163,6 +3927,12 @@
       "geofabrik": "asia/uzbekistan",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        37.16636,
+        55.97708,
+        45.61884,
+        73.17463
       ]
     },
     {
@@ -2170,6 +3940,12 @@
       "geofabrik": "australia-oceania/vanuatu",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        -21.64288,
+        163.3086,
+        -12.29626,
+        173.6089
       ]
     },
     {
@@ -2177,6 +3953,12 @@
       "geofabrik": "south-america/venezuela",
       "groups": [
         "south-america"
+      ],
+      "bbox": [
+        0.621727,
+        -73.38098,
+        15.96134,
+        -59.51474
       ]
     },
     {
@@ -2185,6 +3967,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        42.72498,
+        -73.43943,
+        45.02309,
+        -71.46476
       ]
     },
     {
@@ -2192,6 +3980,12 @@
       "geofabrik": "asia/vietnam",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        7.382239,
+        102.0959,
+        23.40214,
+        114.6423
       ]
     },
     {
@@ -2200,6 +3994,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        36.53798,
+        -83.67841,
+        39.46901,
+        -74.29751
       ]
     },
     {
@@ -2207,6 +4007,12 @@
       "geofabrik": "russia/volga-fed-district",
       "groups": [
         "russia"
+      ],
+      "bbox": [
+        49.75097,
+        41.72107,
+        61.71971,
+        61.73371
       ]
     },
     {
@@ -2214,6 +4020,12 @@
       "geofabrik": "australia-oceania/wallis-et-futuna",
       "groups": [
         "australia-oceania"
+      ],
+      "bbox": [
+        -16.25685,
+        -179.978,
+        -9.05868,
+        -174.1553
       ]
     },
     {
@@ -2222,6 +4034,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        45.53882,
+        -126.7423,
+        49.00708,
+        -116.9115
       ]
     },
     {
@@ -2230,6 +4048,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        37.19858,
+        -82.64965,
+        40.64636,
+        -77.7141
       ]
     },
     {
@@ -2238,6 +4062,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        42.48899,
+        -92.89089,
+        47.41451,
+        -86.20021
       ]
     },
     {
@@ -2246,6 +4076,12 @@
       "groups": [
         "us",
         "north-america"
+      ],
+      "bbox": [
+        40.98339,
+        -111.0576,
+        45.01216,
+        -103.9413
       ]
     },
     {
@@ -2253,6 +4089,12 @@
       "geofabrik": "asia/yemen",
       "groups": [
         "asia"
+      ],
+      "bbox": [
+        11.36768,
+        41.06894,
+        19.03189,
+        55.51167
       ]
     },
     {
@@ -2261,6 +4103,12 @@
       "groups": [
         "canada",
         "north-america"
+      ],
+      "bbox": [
+        59.99739,
+        -141.2389,
+        70.16293,
+        -123.8021
       ]
     },
     {
@@ -2268,6 +4116,12 @@
       "geofabrik": "africa/zambia",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -18.08777,
+        21.98982,
+        -8.239483,
+        33.71773
       ]
     },
     {
@@ -2275,6 +4129,12 @@
       "geofabrik": "africa/zimbabwe",
       "groups": [
         "africa"
+      ],
+      "bbox": [
+        -22.44725,
+        25.2229,
+        -15.58707,
+        33.08541
       ]
     }
   ],

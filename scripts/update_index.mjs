@@ -177,14 +177,38 @@ function loadRegions(args) {
   const config = loadJson(join(projectRoot, "regions.json"), null);
   if (!config?.regions?.length) throw new Error("regions.json has no regions.");
   const regions = config.regions
-    .map(region => ({
-      id: String(region.id || region.geofabrik?.split("/").pop() || "").trim(),
-      geofabrik: region.geofabrik || "",
-      pbf: region.pbf ? resolve(projectRoot, region.pbf) : join(WORK, "regions", String(region.id), `${region.id}-latest.osm.pbf`),
-      pinned: Boolean(region.pbf),
-      groups: Array.isArray(region.groups) ? region.groups.map(String) : [],
-      overrides: region.overrides || null
-    }))
+    .map(region => {
+      const bbox = region.bbox == null
+        ? null
+        : Array.isArray(region.bbox)
+          ? region.bbox.map(Number)
+          : [];
+      if (
+        bbox
+        && (
+          bbox.length !== 4
+          || bbox.some(value => !Number.isFinite(value))
+          || bbox[0] < -90
+          || bbox[2] > 90
+          || bbox[0] > bbox[2]
+          || bbox[1] < -180
+          || bbox[1] > 180
+          || bbox[3] < -180
+          || bbox[3] > 180
+        )
+      ) {
+        throw new Error(`Invalid coverage bbox for region ${region.id}.`);
+      }
+      return {
+        id: String(region.id || region.geofabrik?.split("/").pop() || "").trim(),
+        geofabrik: region.geofabrik || "",
+        pbf: region.pbf ? resolve(projectRoot, region.pbf) : join(WORK, "regions", String(region.id), `${region.id}-latest.osm.pbf`),
+        pinned: Boolean(region.pbf),
+        groups: Array.isArray(region.groups) ? region.groups.map(String) : [],
+        bbox,
+        overrides: region.overrides || null
+      };
+    })
     .filter(region => region.id && (!args.regions || args.regions.includes(region.id)));
   if (!regions.length) throw new Error("No regions selected.");
   return {
@@ -1568,7 +1592,11 @@ async function main() {
     shards: built.map(region => ({
       id: region.id,
       path: `shards/${region.id}/`,
-      bbox: stats.inputs.find(input => input.id === region.id)?.bbox || null,
+      // Geofabrik geometry is the routing coverage. Document-derived extrema
+      // can contain bad OSM coordinates and make an otherwise regional shard
+      // look transcontinental. Custom/pinned regions without configured
+      // coverage retain the legacy stats fallback.
+      bbox: region.bbox || stats.inputs.find(input => input.id === region.id)?.bbox || null,
       groups: region.groups
     })),
     scoringStats: stats,
