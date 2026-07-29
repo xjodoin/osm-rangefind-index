@@ -7,6 +7,7 @@ import {
   loadCategoryLexiconModule,
   mergeShardTypeVocabulary
 } from "../scripts/lib/category_lexicon.mjs";
+import { createOsmIndexConfig } from "rangefind/osm/node";
 
 test("installed rangefind exports the category lexicon builder", async () => {
   const module = await loadCategoryLexiconModule();
@@ -15,6 +16,21 @@ test("installed rangefind exports the category lexicon builder", async () => {
   assert.equal(artifact.facet, "type");
   assert.deepEqual(artifact.types, ["cinema"]);
   assert.equal(artifact.aliases["movie theater"], "cinema");
+});
+
+test("installed OSM builder enables category-cell routing and geo capsules", () => {
+  const config = createOsmIndexConfig({});
+  assert.equal(config.geoCapsules, true);
+  assert.ok(config.geoCapsuleFields.includes("type"));
+  assert.deepEqual(config.geoCellIndexes, [{
+    field: "location",
+    facet: "type",
+    levels: [9, 12, 15],
+    blockZoom: 9,
+    codeGroupSize: 16,
+    maxCellsPerQuery: 48,
+    values: config.filterBitmapFacetValues.type
+  }]);
 });
 
 test("shard vocabulary merge fails closed on unreadable shards and caches by fingerprint", async () => {
