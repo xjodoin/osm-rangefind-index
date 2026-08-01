@@ -26,6 +26,32 @@ test("collects exact paths, content-addressed names, and directory prefixes", ()
   assert.equal(isProtectedObject("shards/quebec/docs/packs/old.bin", protections), false);
 });
 
+test("protects binary lexicon hot-list namespaces that are only referenced transitively", () => {
+  const protections = createProtections();
+  collectManifestProtections({
+    authority: {
+      autocomplete: {
+        hot_prefixes: 1330,
+        directory: { file: "authority/lexicon-root.current.bin.gz" }
+      }
+    }
+  }, "shards/quebec/manifest.gen0000.min.json", protections);
+  collectManifestProtections({
+    suggest_routing: {
+      authority: {
+        autocomplete: {
+          hot_prefixes: 2048,
+          root: { file: "authority/lexicon-root.current.bin.gz" }
+        }
+      }
+    }
+  }, "manifest.min.json", protections);
+
+  assert.equal(isProtectedObject("shards/quebec/authority/hot/live.bin.gz", protections), true);
+  assert.equal(isProtectedObject("authority/hot/live.bin.gz", protections), true);
+  assert.equal(isProtectedObject("shards/quebec/gen-0001/authority/hot/old.bin.gz", protections), false);
+});
+
 test("requires a continuously unreferenced grace period before deletion", () => {
   const protections = createProtections();
   protections.basenames.add("live.bin");

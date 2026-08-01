@@ -39,6 +39,19 @@ export function collectManifestProtections(manifest, manifestPath, protections) 
       return;
     }
     if (value && typeof value === "object") {
+      // Authority autocomplete roots keep their content-addressed hot-list
+      // object names inside a compressed binary lexicon root. Those
+      // transitive references cannot be discovered by walking manifest JSON,
+      // so protect the sibling hot/ namespace whenever the manifest declares
+      // that the lexicon contains hot prefixes. This covers both per-shard
+      // authority indexes and the root suggest-routing authority index while
+      // leaving superseded namespaces eligible for the normal grace period.
+      const hotPrefixes = Number(value.hot_prefixes || 0);
+      const lexiconFile = value.directory?.file || value.root?.file;
+      if (hotPrefixes > 0 && typeof lexiconFile === "string") {
+        const resolved = relativeTo(base, lexiconFile);
+        if (resolved) protections.prefixes.add(`${posix.join(posix.dirname(resolved), "hot")}/`);
+      }
       for (const [childKey, child] of Object.entries(value)) visit(child, childKey);
     }
   };

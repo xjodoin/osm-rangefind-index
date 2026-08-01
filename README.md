@@ -170,6 +170,9 @@ same launcher lock as the indexer, marks immutable objects referenced by the
 live root/shard/generation manifests, and tracks everything else in
 `work/r2-gc-state.json`. An object must remain continuously unreferenced for
 seven days before `--apply` deletes it; its upload age alone is never enough.
+Binary autocomplete lexicon roots reference content-addressed hot lists
+transitively, so every live lexicon's sibling `authority/hot/` namespace is
+also protected even though those object names do not appear in manifest JSON.
 The weekly systemd timer runs Friday at 07:00 Montreal time. The first apply
 run only establishes the grace-period baseline, and every run writes
 `work/r2-gc-last-report.json` plus `logs/r2-gc.log`.

@@ -94,7 +94,7 @@ const RANGEFIND_VERSION = taskRequire("rangefind/package.json").version;
 // Runtime-only releases must not invalidate every published shard. Keep this
 // at the newest Rangefind release that changed builder output or analysis
 // semantics, and bump it deliberately when artifacts really must be rebuilt.
-const RANGEFIND_BUILDER_VERSION = "0.3.16";
+const RANGEFIND_BUILDER_VERSION = "0.3.22";
 const WORK = join(projectRoot, "work");
 const OUT = join(WORK, "public/rangefind");
 const STATE_PATH = join(WORK, "state.json");
