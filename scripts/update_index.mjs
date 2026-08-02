@@ -94,7 +94,7 @@ const RANGEFIND_VERSION = taskRequire("rangefind/package.json").version;
 // Runtime-only releases must not invalidate every published shard. Keep this
 // at the newest Rangefind release that changed builder output or analysis
 // semantics, and bump it deliberately when artifacts really must be rebuilt.
-const RANGEFIND_BUILDER_VERSION = "0.3.22";
+const RANGEFIND_BUILDER_VERSION = "0.3.24";
 const WORK = join(projectRoot, "work");
 const OUT = join(WORK, "public/rangefind");
 const STATE_PATH = join(WORK, "state.json");
@@ -691,10 +691,14 @@ const TEXT_ROUTING_BLOCK_PATH = join(WORK, "text-routing-block.json");
 const SUGGEST_SETS_DIR = join(WORK, "suggest-sets");
 const SUGGEST_ROUTING_BLOCK_PATH = join(WORK, "suggest-routing-block.json");
 const TEXT_ROUTING_WORKER = join(projectRoot, "scripts/text_routing_worker.mjs");
+// Bump when a Rangefind release changes which document terms are emitted even
+// though the logical OSM/PBF content fingerprint is unchanged. Schema-v2 OSM
+// documents add named-road classes and richer searchable metadata.
+const TEXT_ROUTING_SCHEMA_VERSION = 2;
 // Bump whenever the root suggest artifact layout changes independently of
 // shard content. The fingerprint must invalidate the checkpointed manifest
 // block so a finalize-only run rebuilds routing from the existing sidecars.
-const SUGGEST_ROUTING_SCHEMA_VERSION = 2;
+const SUGGEST_ROUTING_SCHEMA_VERSION = 3;
 
 function termSetPath(region) {
   return join(TERM_SETS_DIR, `${region.id.replaceAll("/", "-")}.terms.gz`);
@@ -813,6 +817,7 @@ async function buildTextRoutingArtifact(built, state, store, args, outOfTime) {
   }
   if (!await prepareTextRoutingTermSets(built, state, store, args, outOfTime, 10 * 60_000)) return null;
   const fingerprint = createHash("sha1")
+    .update(`text-routing-schema:${TEXT_ROUTING_SCHEMA_VERSION}\n`)
     .update(JSON.stringify(built.map(region => [region.id, builtContentFingerprint(state.regions[region.id] || {})])))
     .digest("hex");
   const existing = loadJson(TEXT_ROUTING_BLOCK_PATH, null);
