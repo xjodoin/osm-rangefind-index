@@ -157,6 +157,16 @@ export function addressSourcesForRegion(sources, region) {
   });
 }
 
+export function regionRoutingMetadata(region = {}) {
+  const codes = values => [...new Set((Array.isArray(values) ? values : [])
+    .map(value => clean(value).toUpperCase())
+    .filter(Boolean))];
+  return {
+    countryCodes: codes(region.countryCodes),
+    subdivisionCodes: codes(region.subdivisionCodes)
+  };
+}
+
 function extensionFor(source) {
   const urlName = basename(new URL(source.url).pathname);
   const extension = extname(urlName);

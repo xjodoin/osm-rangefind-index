@@ -13,6 +13,7 @@ import {
   partitionAddressSourceSpatially,
   prepareAddressSource,
   regionAddressSourceIdentity,
+  regionRoutingMetadata,
   spatialPartitionForRegion
 } from "../scripts/lib/address_sources.mjs";
 
@@ -192,6 +193,17 @@ test("spatial routing uses ISO country and subdivision metadata to avoid bbox du
   assert.deepEqual(router.route(45, -74.5, { country: "CA", state: "ON" }).map(region => region.id), ["ontario"]);
   assert.deepEqual(router.route(45, -73.4, { country: "US", state: "VT" }).map(region => region.id), ["vermont"]);
   assert.deepEqual(router.route(45, -73.4, { country: "Canada", state: "Quebec" }).map(region => region.id), ["quebec", "vermont"]);
+});
+
+test("region loader metadata preserves normalized ISO routing codes", () => {
+  assert.deepEqual(regionRoutingMetadata({
+    countryCodes: ["ca", " CA "],
+    subdivisionCodes: ["ca-qc", "CA-QC"]
+  }), {
+    countryCodes: ["CA"],
+    subdivisionCodes: ["CA-QC"]
+  });
+  assert.deepEqual(regionRoutingMetadata({}), { countryCodes: [], subdivisionCodes: [] });
 });
 
 test("OpenAddresses streams authenticated jobs into compressed worldwide partitions with provenance", async () => {

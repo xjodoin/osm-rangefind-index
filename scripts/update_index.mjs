@@ -95,6 +95,7 @@ import {
   partitionAddressSourceSpatially,
   prepareAddressSource,
   regionAddressSourceIdentity,
+  regionRoutingMetadata,
   spatialPartitionForRegion
 } from "./lib/address_sources.mjs";
 
@@ -220,6 +221,7 @@ function loadRegions(args) {
         pinned: Boolean(region.pbf),
         groups: Array.isArray(region.groups) ? region.groups.map(String) : [],
         bbox,
+        ...regionRoutingMetadata(region),
         overrides: region.overrides || null,
         addressSources: addressSourcesForRegion(ADDRESS_SOURCES.sources, {
           id: String(region.id),
