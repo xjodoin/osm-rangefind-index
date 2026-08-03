@@ -104,7 +104,10 @@ configuration), so downloads and normal-sized extracts can overlap. A PBF at
 or above `largePbfBytes` (default 1 GiB) consumes every lane and extracts
 alone to protect memory on the 31 GiB production host. Stats and shard builds
 remain sequential; each shard build already uses the configured CPU worker
-pool. Direct R2 uploads preserve packs-before-generation-manifests-before-root-
+pool. `partitionReducerWorkers` is capped separately (default `4`) because
+each reducer owns a bounded code-store preload; this keeps large shards out of
+memory reclaim without reducing scan/extraction parallelism. Direct R2 uploads
+preserve packs-before-generation-manifests-before-root-
 manifest ordering for every shard.
 
 Rough planet budget on a modern 12–16-core box: ~78 GiB of downloads

@@ -232,6 +232,11 @@ function loadRegions(args) {
     regions,
     statsDriftRatio: Number(config.statsDriftRatio || 0.1),
     workerCount: Number(config.workerCount || 0),
+    // Reducers preload a bounded code-store window per worker. Reusing every
+    // scan worker here multiplies that window and can force a large shard into
+    // sustained cgroup reclaim. Keep scan parallelism high, but give reduction
+    // its own deliberately smaller pool.
+    partitionReducerWorkers: Math.max(1, Number(config.partitionReducerWorkers) || 4),
     acquisitionConcurrency: Math.max(1, Math.min(4, Number(config.acquisitionConcurrency || 1))),
     largePbfBytes: Math.max(1, Number(config.largePbfBytes || 1024 ** 3)),
     publisher: String(config.publisher || ""),
@@ -592,6 +597,7 @@ async function ensureScoringStats(regions, options, state, force, allowRegen = t
 
 function shardConfig(region, options, scoringStatsPath, input = null, state = null) {
   const workerCount = options.workerCount > 0 ? options.workerCount : Math.max(1, availableParallelism() - 1);
+  const partitionReducerWorkers = Math.min(workerCount, options.partitionReducerWorkers);
   const entry = state?.regions?.[region.id] || {};
   return createOsmIndexConfig({
     workerCount,
@@ -610,6 +616,7 @@ function shardConfig(region, options, scoringStatsPath, input = null, state = nu
       ...(entry.pbfLastModified ? { data_version: entry.pbfLastModified } : {})
     },
     overrides: {
+      partitionReducerWorkers,
       ...(region.overrides || {}),
       ...(scoringStatsPath ? { scoringStats: scoringStatsPath } : {})
     }
