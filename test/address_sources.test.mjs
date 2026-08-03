@@ -196,9 +196,11 @@ test("OpenAddresses streams authenticated jobs into compressed worldwide partiti
     const calls = [];
     const fetchSource = async (url, init = {}) => {
       const value = String(url);
-      calls.push({ value, redirect: init.redirect });
+      const authorization = new Headers(init.headers).get("authorization");
+      calls.push({ value, redirect: init.redirect, authorization });
       if (value.endsWith("/data?layer=addresses")) return Response.json(catalog);
-      assert.match(value, /token=secret-test-token/u);
+      assert.doesNotMatch(value, /secret-test-token/u);
+      assert.equal(authorization, "Bearer secret-test-token");
       if (init.redirect === "manual") return new Response(null, { status: 302, headers: { location: "https://cdn.example.test/job.gz" } });
       const jsonl = `${features.map(feature => JSON.stringify(feature)).join("\n")}\n`;
       return new Response(gzipSync(jsonl), { status: 200 });

@@ -216,7 +216,6 @@ function openAddressesRecord(feature, entry) {
 async function *readOpenAddressesJob(source, entry, options) {
   const token = clean(process.env[source.tokenEnv]);
   const url = new URL(`${source.apiUrl}/job/${entry.job}/output/source.geojson.gz`);
-  url.searchParams.set("token", token);
   const controller = new AbortController();
   const idleMs = Math.max(10_000, Number(source.downloadIdleTimeoutMs || 120_000));
   let idleTimer;
@@ -227,7 +226,10 @@ async function *readOpenAddressesJob(source, entry, options) {
   armIdleTimeout();
   let response;
   try {
-    response = await options.fetchSource(url, { signal: controller.signal }, { timeoutMs: options.timeoutMs });
+    response = await options.fetchSource(url, {
+      signal: controller.signal,
+      headers: { authorization: `Bearer ${token}` }
+    }, { timeoutMs: options.timeoutMs });
   } catch (error) {
     clearTimeout(idleTimer);
     throw new Error(`${source.id}: OpenAddresses job ${entry.job} request failed: ${redactSecret(error.message, token)}`);
@@ -306,10 +308,12 @@ async function prepareOpenAddressesSource(source, options) {
   // Validate authentication without downloading an address payload. Manual
   // redirect mode returns the authenticated CDN hand-off as a small 3xx.
   const probe = new URL(`${source.apiUrl}/job/${entries[0].job}/output/source.geojson.gz`);
-  probe.searchParams.set("token", token);
   let auth;
   try {
-    auth = await options.fetchSource(probe, { redirect: "manual" }, { timeoutMs: options.timeoutMs });
+    auth = await options.fetchSource(probe, {
+      redirect: "manual",
+      headers: { authorization: `Bearer ${token}` }
+    }, { timeoutMs: options.timeoutMs });
   } catch (error) {
     throw new Error(`${source.id}: OpenAddresses authentication check failed: ${redactSecret(error.message, token)}`);
   }
