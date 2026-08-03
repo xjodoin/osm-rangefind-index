@@ -7,6 +7,7 @@
       "apiUrl": "https://batch.openaddresses.io/api",
       "tokenEnv": "OPENADDRESSES_TOKEN",
       "refreshIntervalHours": 168,
+      "partitionConcurrency": 4,
       "website": "https://openaddresses.io/",
       "includeAddresses": true,
       "includeUnits": false,

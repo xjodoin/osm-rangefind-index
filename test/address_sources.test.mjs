@@ -48,6 +48,25 @@ test("address source configuration is generic, validated, and region-partitioned
     assert.equal(quebec.length, 1);
     assert.equal(ontario.length, 0);
 
+    const openAddressesPath = join(root, "openaddresses.json");
+    await writeFile(openAddressesPath, JSON.stringify({ sources: [{
+      id: "openaddresses",
+      provider: "openaddresses-batch",
+      apiUrl: "https://batch.example.test/api",
+      tokenEnv: "OPENADDRESSES_TEST_TOKEN",
+      partition: { mode: "spatial" }
+    }] }));
+    assert.equal(loadAddressSourcesConfig(root, openAddressesPath).sources[0].partitionConcurrency, 4);
+    await writeFile(openAddressesPath, JSON.stringify({ sources: [{
+      id: "openaddresses",
+      provider: "openaddresses-batch",
+      apiUrl: "https://batch.example.test/api",
+      tokenEnv: "OPENADDRESSES_TEST_TOKEN",
+      partitionConcurrency: 0,
+      partition: { mode: "spatial" }
+    }] }));
+    assert.throws(() => loadAddressSourcesConfig(root, openAddressesPath), /partitionConcurrency/u);
+
     const adapter = addressSourceAdapterOptions({
       ...quebec[0],
       path: join(root, "postal.zip"),
@@ -159,6 +178,20 @@ test("worldwide sources partition once across conventional, overlapping, and wra
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("spatial routing uses ISO country and subdivision metadata to avoid bbox duplication", () => {
+  const regions = [
+    { id: "quebec", bbox: [44, -80, 63, -57], countryCodes: ["CA"], subdivisionCodes: ["CA-QC"] },
+    { id: "ontario", bbox: [41, -96, 57, -74], countryCodes: ["CA"], subdivisionCodes: ["CA-ON"] },
+    { id: "vermont", bbox: [42.7, -73.5, 45.1, -71.4], countryCodes: ["US"], subdivisionCodes: ["US-VT"] }
+  ];
+  const router = createRegionSpatialRouter(regions);
+  assert.deepEqual(router.route(45, -74.5).map(region => region.id), ["quebec", "ontario"]);
+  assert.deepEqual(router.route(45, -74.5, { country: "CA", state: "QC" }).map(region => region.id), ["quebec"]);
+  assert.deepEqual(router.route(45, -74.5, { country: "CA", state: "ON" }).map(region => region.id), ["ontario"]);
+  assert.deepEqual(router.route(45, -73.4, { country: "US", state: "VT" }).map(region => region.id), ["vermont"]);
+  assert.deepEqual(router.route(45, -73.4, { country: "Canada", state: "Quebec" }).map(region => region.id), ["quebec", "vermont"]);
 });
 
 test("OpenAddresses streams authenticated jobs into compressed worldwide partitions with provenance", async () => {
@@ -273,6 +306,92 @@ test("batched spatial partitioning resumes after the last durable job without du
     const shard = spatialPartitionForRegion(source, partition, region);
     const rows = gunzipSync(await readFile(shard.path)).toString("utf8").trim().split("\n");
     assert.equal(rows.length, 2);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("batched spatial partitioning runs a bounded window concurrently and commits in source order", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rangefind-address-concurrent-"));
+  try {
+    const region = { id: "quebec", bbox: [44, -80, 63, -57], countryCodes: ["CA"] };
+    let active = 0;
+    let maximumActive = 0;
+    const source = {
+      id: "concurrent-global",
+      identity: { snapshot: "v1", config: "v1" },
+      partitionConcurrency: 2,
+      async *batches() {
+        for (const [id, delay] of [["job-a", 30], ["job-b", 0], ["job-c", 0]]) {
+          yield {
+            id,
+            records: async function *records() {
+              active++;
+              maximumActive = Math.max(maximumActive, active);
+              try {
+                await new Promise(resolve => setTimeout(resolve, delay));
+                yield { id, houseNumber: "1", street: id, country: "CA", lat: 45, lon: -74 };
+              } finally {
+                active--;
+              }
+            }
+          };
+        }
+      }
+    };
+    const partition = await partitionAddressSourceSpatially(source, {
+      root: join(root, "partitions"),
+      regions: [region],
+      normalizeRecord: record => record
+    });
+    assert.equal(maximumActive, 2);
+    assert.equal(partition.batches, 3);
+    assert.equal(partition.rowsRead, 3);
+    const shard = spatialPartitionForRegion(source, partition, region);
+    const ids = gunzipSync(await readFile(shard.path)).toString("utf8").trim().split("\n").map(line => JSON.parse(line).id);
+    assert.deepEqual(ids, ["job-a", "job-b", "job-c"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("batched spatial partitioning rolls back an interrupted fragment commit before resume", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rangefind-address-transaction-"));
+  try {
+    const region = { id: "quebec", bbox: [44, -80, 63, -57], countryCodes: ["CA"] };
+    let visits = 0;
+    const source = {
+      id: "transactional-global",
+      identity: { snapshot: "v1", config: "v1" },
+      async *batches(completed) {
+        if (completed.has("job-a")) return;
+        yield {
+          id: "job-a",
+          records: async function *records() {
+            visits++;
+            yield { id: "one", houseNumber: "1", street: "Safe Road", country: "CA", lat: 45, lon: -74 };
+          }
+        };
+      }
+    };
+    const options = {
+      root: join(root, "partitions"),
+      regions: [region],
+      normalizeRecord: record => record
+    };
+    await assert.rejects(partitionAddressSourceSpatially(source, {
+      ...options,
+      afterBatchAppend() {
+        throw new Error("simulated process interruption");
+      }
+    }), /simulated process interruption/u);
+    const partition = await partitionAddressSourceSpatially(source, options);
+    assert.equal(visits, 2);
+    assert.equal(partition.rowsRead, 1);
+    assert.equal(partition.regions.quebec, 1);
+    const shard = spatialPartitionForRegion(source, partition, region);
+    const rows = gunzipSync(await readFile(shard.path)).toString("utf8").trim().split("\n");
+    assert.equal(rows.length, 1);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

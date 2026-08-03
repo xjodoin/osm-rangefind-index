@@ -41,9 +41,12 @@ CSV/TSV field mapping, defaults, attribution, applicable region groups, and an
 optional explicit or coordinate-based shard partition. The built-in
 `openaddresses-batch` provider consumes the live normalized address catalog as
 bounded per-source gzip jobs instead of staging the roughly 72 GB global ZIP.
-Each completed job is checkpointed and appended as a valid gzip member to the
-matching shard partitions, so interruption repeats at most one source job and
-disk use stays close to the compressed regional output. A worldwide file
+Four jobs run concurrently by default (`partitionConcurrency`, configurable
+from 1–16), each producing isolated shard fragments. Completed fragments are
+committed in deterministic source order as concatenated gzip members. A small
+write-ahead checkpoint truncates an interrupted append before resume, so a
+crash cannot duplicate records and disk use stays close to the compressed
+regional output. A worldwide file
 downloads once into `work/address-sources/` and is converted in one pass to
 canonical per-shard JSONL, avoiding hundreds of rescans. Every matching region
 then streams its thin partition through the same enrichment engine. Code adapters can use the lower-level
@@ -69,8 +72,15 @@ source namespace. Sources are refreshed weekly by default so a continuously
 running indexer does not repartition the planet every night; change
 `refreshIntervalHours` when a different cadence is appropriate. For a thin
 postal-only layer, GeoNames remains substantially cheaper. Spatial partitioning
-routes either provider into every overlapping OSM shard coverage box, including
-antimeridian-spanning regions.
+uses Geofabrik ISO country and subdivision metadata before falling back to
+coverage boxes. This avoids safe-to-eliminate cross-border and state/province
+duplication while retaining bbox overlap for regions without authoritative
+codes, including antimeridian-spanning regions.
+
+Run `npm run benchmark:addresses` to compare sequential and four-job partition
+throughput with deterministic synthetic country/subdivision overlap. Use
+`-- --jobs N --rows-per-job N --parallelism N --network-delay-ms N` to model a
+specific host or source profile.
 
 ## The shard set
 

@@ -9,6 +9,7 @@
   },
   "scripts": {
     "test": "node --test",
+    "benchmark:addresses": "node scripts/benchmark_address_partition.mjs",
     "update": "node scripts/update_index.mjs",
     "update:dry": "node scripts/update_index.mjs --no-upload",
     "refresh:root-lexicon": "scripts/refresh_root_lexicon.sh",

@@ -69,6 +69,34 @@ const featureByGeofabrik = new Map(index.features.map(feature => [
 ]));
 const existing = JSON.parse(readFileSync(join(projectRoot, "regions.json"), "utf8"));
 
+function metadataCodes(entry, key, inherit = false) {
+  const codes = new Set(entry?.[key] || []);
+  if (inherit && entry?.id?.includes("/")) {
+    const parts = entry.id.split("/");
+    for (let length = parts.length - 1; length > 0; length--) {
+      for (const code of byId.get(parts.slice(0, length).join("/"))?.[key] || []) codes.add(code);
+    }
+  }
+  if (inherit) {
+    let parent = entry?.parent;
+    while (parent) {
+      const parentEntry = byId.get(parent);
+      for (const code of parentEntry?.[key] || []) codes.add(code);
+      parent = parentEntry?.parent;
+    }
+  }
+  return [...codes].map(String).sort();
+}
+
+function routingMetadata(entry) {
+  const countryCodes = metadataCodes(entry, "iso3166-1:alpha2", true);
+  const subdivisionCodes = metadataCodes(entry, "iso3166-2");
+  return {
+    ...(countryCodes.length ? { countryCodes } : {}),
+    ...(subdivisionCodes.length ? { subdivisionCodes } : {})
+  };
+}
+
 if (bboxesOnly) {
   const regions = existing.regions.map(region => {
     const feature = featureByGeofabrik.get(region.geofabrik);
@@ -76,7 +104,8 @@ if (bboxesOnly) {
     if (!feature || !bbox) {
       throw new Error(`No Geofabrik coverage geometry for ${region.id} (${region.geofabrik}).`);
     }
-    return { ...region, bbox };
+    const { countryCodes: _countryCodes, subdivisionCodes: _subdivisionCodes, ...stableRegion } = region;
+    return { ...stableRegion, ...routingMetadata(feature.properties), bbox };
   });
   const output = { ...existing, regions };
   if (dryRun) {
@@ -193,6 +222,7 @@ const regions = selected
       geofabrik,
       name: entry.name,
       groups: groupsOf(entry),
+      ...routingMetadata(entry),
       bbox: geometryCoverageBbox(featureById.get(entry.id)?.geometry)
     };
   })
@@ -248,10 +278,12 @@ if (verify) {
 
 const output = {
   "//": existing["//"],
-  regions: regions.map(({ id, geofabrik, groups, bbox }) => ({
+  regions: regions.map(({ id, geofabrik, groups, countryCodes, subdivisionCodes, bbox }) => ({
     id,
     geofabrik,
     ...(groups.length ? { groups } : {}),
+    ...(countryCodes?.length ? { countryCodes } : {}),
+    ...(subdivisionCodes?.length ? { subdivisionCodes } : {}),
     bbox
   })),
   statsDriftRatio: existing.statsDriftRatio ?? 0.1,

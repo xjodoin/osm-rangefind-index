@@ -1,5 +1,6 @@
 import {
   closeSync,
+  createReadStream,
   createWriteStream,
   existsSync,
   mkdirSync,
@@ -16,7 +17,7 @@ import { createHash } from "node:crypto";
 import { once } from "node:events";
 import { basename, dirname, extname, join, resolve } from "node:path";
 import { Readable } from "node:stream";
-import { finished } from "node:stream/promises";
+import { finished, pipeline } from "node:stream/promises";
 import { createInterface } from "node:readline";
 import { createGunzip, createGzip } from "node:zlib";
 
@@ -56,6 +57,7 @@ function configFingerprint(source) {
     refreshIntervalHours: source.refreshIntervalHours,
     downloadAttempts: source.downloadAttempts,
     downloadIdleTimeoutMs: source.downloadIdleTimeoutMs,
+    partitionConcurrency: source.partitionConcurrency,
     partitionCompressionLevel: source.partitionCompressionLevel,
     url: source.url,
     website: source.website,
@@ -94,6 +96,11 @@ function validateSource(raw) {
     source.tokenEnv = clean(raw.tokenEnv || "OPENADDRESSES_TOKEN");
     source.format = "openaddresses-geojsonl";
     source.url ||= "https://openaddresses.io/";
+    const partitionConcurrency = Number(raw.partitionConcurrency ?? 4);
+    if (!Number.isInteger(partitionConcurrency) || partitionConcurrency < 1 || partitionConcurrency > 16) {
+      throw new Error(`Address source ${source.id}: partitionConcurrency must be an integer from 1 to 16.`);
+    }
+    source.partitionConcurrency = partitionConcurrency;
     if (!source.tokenEnv) throw new Error(`Address source ${source.id} has no token environment variable.`);
   } else if (provider !== "file") {
     throw new Error(`Address source ${source.id}: unsupported provider ${JSON.stringify(provider)}.`);
@@ -436,7 +443,7 @@ export function regionAddressSourceIdentity(preparedSources) {
     .digest("hex");
 }
 
-const SPATIAL_PARTITION_SCHEMA_VERSION = 2;
+const SPATIAL_PARTITION_SCHEMA_VERSION = 3;
 const GRID_DEGREES = 5;
 const PARTITION_BUFFER_BYTES = 1024 * 1024;
 
@@ -481,12 +488,32 @@ export function createRegionSpatialRouter(regions) {
     }
   }
   return {
-    route(latValue, lonValue) {
+    route(latValue, lonValue, record = null) {
       const lat = Number(latValue);
       const lon = Number(lonValue);
       if (!Number.isFinite(lat) || !Number.isFinite(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) return [];
       const candidates = cells.get(`${gridLat(lat)}:${gridLon(lon)}`) || [];
-      return candidates.filter(region => bboxContains(region.bbox, lat, lon));
+      let matches = candidates.filter(region => bboxContains(region.bbox, lat, lon));
+      if (matches.length < 2) return matches;
+
+      const country = clean(record?.country).toUpperCase();
+      if (/^[A-Z]{2}$/u.test(country)) {
+        const countryMatches = matches.filter(region => region.countryCodes?.includes(country));
+        if (countryMatches.length) matches = countryMatches;
+        else {
+          const uncodedMatches = matches.filter(region => !region.countryCodes?.length);
+          if (uncodedMatches.length) matches = uncodedMatches;
+        }
+      }
+
+      if (matches.length < 2) return matches;
+      const subdivision = clean(record?.state).toUpperCase();
+      if (/^[A-Z]{2}$/u.test(country) && subdivision) {
+        const qualified = subdivision.includes("-") ? subdivision : `${country}-${subdivision}`;
+        const subdivisionMatches = matches.filter(region => region.subdivisionCodes?.includes(qualified));
+        if (subdivisionMatches.length) matches = subdivisionMatches;
+      }
+      return matches;
     }
   };
 }
@@ -520,8 +547,8 @@ function createBufferedJsonlWriter(path) {
   };
 }
 
-function createGzipJsonlWriter(path, level = 3) {
-  const output = createWriteStream(path, { flags: "a" });
+function createGzipJsonlWriter(path, level = 3, flags = "a") {
+  const output = createWriteStream(path, { flags });
   const gzip = createGzip({ level });
   gzip.pipe(output);
   let closed = false;
@@ -548,6 +575,127 @@ function writeJsonAtomic(path, value) {
   renameSync(partial, path);
 }
 
+function batchFragmentDirectory(root, batchId) {
+  const digest = createHash("sha256").update(String(batchId)).digest("hex").slice(0, 24);
+  return join(root, digest);
+}
+
+function restorePendingBatch(partial, progress, progressPath) {
+  if (!progress?.pending?.offsets) return progress;
+  for (const [regionId, offsetValue] of Object.entries(progress.pending.offsets)) {
+    const path = partitionFile(partial, regionId, "gzip");
+    const offset = Math.max(0, Number(offsetValue) || 0);
+    if (offset) truncateSync(path, offset);
+    else rmSync(path, { force: true });
+  }
+  const restored = { ...progress };
+  delete restored.pending;
+  writeJsonAtomic(progressPath, restored);
+  return restored;
+}
+
+async function processAddressBatch(source, batch, options, context) {
+  const { fragmentRoot, router } = context;
+  const attempts = Math.max(1, Number(source.downloadAttempts || 3));
+  const fragmentDir = batchFragmentDirectory(fragmentRoot, batch.id);
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    rmSync(fragmentDir, { recursive: true, force: true });
+    mkdirSync(fragmentDir, { recursive: true });
+    const writers = new Map();
+    const counts = {};
+    const stats = { rowsRead: 0, normalized: 0, unmatched: 0, writes: 0 };
+    try {
+      const records = typeof batch.records === "function" ? batch.records() : batch.records;
+      for await (const raw of records) {
+        stats.rowsRead++;
+        const mapped = typeof source.normalize === "function" ? source.normalize(raw) : raw;
+        const record = options.normalizeRecord(mapped, source.defaults);
+        if (!record || (typeof source.filter === "function" && !source.filter(record, raw))) continue;
+        stats.normalized++;
+        const matches = router.route(record.lat, record.lon, record);
+        if (!matches.length) {
+          stats.unmatched++;
+          continue;
+        }
+        for (const region of matches) {
+          if (!writers.has(region.id)) {
+            const path = partitionFile(fragmentDir, region.id, "gzip");
+            const level = Math.max(1, Math.min(9, Number(source.partitionCompressionLevel || 3)));
+            writers.set(region.id, createGzipJsonlWriter(path, level, "w"));
+          }
+          const backpressure = writers.get(region.id).write(record);
+          if (backpressure) await backpressure;
+          counts[region.id] = Number(counts[region.id] || 0) + 1;
+          stats.writes++;
+        }
+        if (stats.rowsRead % 250_000 === 0) {
+          options.log?.(`${source.id}: ${batch.label || batch.id} streamed ${stats.rowsRead.toLocaleString()} rows into ${stats.writes.toLocaleString()} shard records`);
+        }
+      }
+      await Promise.all([...writers.values()].map(writer => writer.close()));
+      return { batch, fragmentDir, counts, stats };
+    } catch (error) {
+      await Promise.allSettled([...writers.values()].map(writer => writer.close()));
+      rmSync(fragmentDir, { recursive: true, force: true });
+      if (attempt < attempts && typeof batch.records === "function") {
+        options.log?.(`${source.id}: retrying ${batch.label || batch.id} after attempt ${attempt}/${attempts}: ${error.message}`);
+        continue;
+      }
+      throw new Error(`${source.id}: failed while partitioning ${batch.label || batch.id}: ${error.message}`, { cause: error });
+    }
+  }
+  throw new Error(`${source.id}: exhausted retries for ${batch.label || batch.id}`);
+}
+
+async function appendBatchFragments(result, source, context) {
+  const { partial, progressPath, completed, counts, stats, routingIdentity } = context;
+  const offsets = {};
+  for (const regionId of Object.keys(result.counts)) {
+    const path = partitionFile(partial, regionId, "gzip");
+    offsets[regionId] = existsSync(path) ? statSync(path).size : 0;
+  }
+  writeJsonAtomic(progressPath, {
+    schemaVersion: SPATIAL_PARTITION_SCHEMA_VERSION,
+    identity: routingIdentity,
+    source: source.identity,
+    compression: "gzip",
+    completed: [...completed],
+    regions: counts,
+    stats,
+    pending: { id: result.batch.id, offsets },
+    updatedAt: new Date().toISOString()
+  });
+
+  for (const regionId of Object.keys(result.counts).sort()) {
+    await pipeline(
+      createReadStream(partitionFile(result.fragmentDir, regionId, "gzip")),
+      createWriteStream(partitionFile(partial, regionId, "gzip"), { flags: "a" })
+    );
+  }
+  await context.afterAppend?.(result.batch);
+  for (const [regionId, value] of Object.entries(result.counts)) {
+    counts[regionId] = Number(counts[regionId] || 0) + value;
+  }
+  for (const key of Object.keys(stats)) stats[key] += result.stats[key];
+  completed.add(result.batch.id);
+  writeJsonAtomic(progressPath, {
+    schemaVersion: SPATIAL_PARTITION_SCHEMA_VERSION,
+    identity: routingIdentity,
+    source: source.identity,
+    compression: "gzip",
+    completed: [...completed],
+    regions: counts,
+    stats,
+    updatedAt: new Date().toISOString()
+  });
+  rmSync(result.fragmentDir, { recursive: true, force: true });
+  optionsLogCheckpoint(source, result.batch, completed, stats, context.log);
+}
+
+function optionsLogCheckpoint(source, batch, completed, stats, log) {
+  log?.(`${source.id}: checkpointed ${batch.label || batch.id} (${completed.size.toLocaleString()} jobs, ${stats.rowsRead.toLocaleString()} rows durable)`);
+}
+
 async function partitionAddressSourceBatches(source, options, context) {
   const { regions, root, partial, router, routingIdentity } = context;
   const progressPath = join(partial, "partitions.progress.json");
@@ -557,6 +705,7 @@ async function partitionAddressSourceBatches(source, options, context) {
     progress = null;
   }
   mkdirSync(partial, { recursive: true });
+  progress = restorePendingBatch(partial, progress, progressPath);
   const counts = progress?.regions || Object.fromEntries(regions.map(region => [region.id, 0]));
   const stats = progress?.stats || { rowsRead: 0, normalized: 0, unmatched: 0, writes: 0 };
   const completed = new Set(progress?.completed || []);
@@ -564,74 +713,51 @@ async function partitionAddressSourceBatches(source, options, context) {
     options.log?.(`${source.id}: resuming after ${completed.size.toLocaleString()} completed OpenAddresses jobs`);
   }
 
-  for await (const batch of source.batches(completed)) {
-    const countsBefore = { ...counts };
-    const statsBefore = { ...stats };
-    const attempts = Math.max(1, Number(source.downloadAttempts || 3));
-    let completedBatch = false;
-    for (let attempt = 1; attempt <= attempts && !completedBatch; attempt++) {
-      const writers = new Map();
-      const offsets = new Map();
-      try {
-        const records = typeof batch.records === "function" ? batch.records() : batch.records;
-        for await (const raw of records) {
-          stats.rowsRead++;
-          const mapped = typeof source.normalize === "function" ? source.normalize(raw) : raw;
-          const record = options.normalizeRecord(mapped, source.defaults);
-          if (!record || (typeof source.filter === "function" && !source.filter(record, raw))) continue;
-          stats.normalized++;
-          const matches = router.route(record.lat, record.lon);
-          if (!matches.length) {
-            stats.unmatched++;
-            continue;
-          }
-          for (const region of matches) {
-            if (!writers.has(region.id)) {
-              const path = partitionFile(partial, region.id, "gzip");
-              offsets.set(region.id, existsSync(path) ? statSync(path).size : 0);
-              const level = Math.max(1, Math.min(9, Number(source.partitionCompressionLevel || 3)));
-              writers.set(region.id, createGzipJsonlWriter(path, level));
-            }
-            const backpressure = writers.get(region.id).write(record);
-            if (backpressure) await backpressure;
-            counts[region.id] = Number(counts[region.id] || 0) + 1;
-            stats.writes++;
-          }
-          if (stats.rowsRead % 250_000 === 0) {
-            options.log?.(`${source.id}: partitioned ${stats.rowsRead.toLocaleString()} rows into ${stats.writes.toLocaleString()} compressed shard records`);
-          }
-        }
-        await Promise.all([...writers.values()].map(writer => writer.close()));
-        completedBatch = true;
-      } catch (error) {
-        await Promise.allSettled([...writers.values()].map(writer => writer.close()));
-        for (const [regionId, offset] of offsets) {
-          const path = partitionFile(partial, regionId, "gzip");
-          if (offset) truncateSync(path, offset);
-          else rmSync(path, { force: true });
-        }
-        Object.assign(counts, countsBefore);
-        Object.assign(stats, statsBefore);
-        if (attempt < attempts && typeof batch.records === "function") {
-          options.log?.(`${source.id}: retrying ${batch.label || batch.id} after attempt ${attempt}/${attempts}: ${error.message}`);
-          continue;
-        }
-        throw new Error(`${source.id}: failed while partitioning ${batch.label || batch.id}: ${error.message}`, { cause: error });
-      }
-    }
-    completed.add(batch.id);
-    writeJsonAtomic(progressPath, {
-      schemaVersion: SPATIAL_PARTITION_SCHEMA_VERSION,
-      identity: routingIdentity,
-      source: source.identity,
-      compression: "gzip",
-      completed: [...completed],
-      regions: counts,
-      stats,
-      updatedAt: new Date().toISOString()
+  const fragmentRoot = join(partial, ".batch-fragments");
+  rmSync(fragmentRoot, { recursive: true, force: true });
+  mkdirSync(fragmentRoot, { recursive: true });
+  const iterator = source.batches(completed)[Symbol.asyncIterator]();
+  const concurrency = Math.max(1, Math.min(16, Number(source.partitionConcurrency || 1)));
+  const active = [];
+  const launch = async () => {
+    const next = await iterator.next();
+    if (next.done) return false;
+    active.push({
+      batch: next.value,
+      promise: processAddressBatch(source, next.value, options, { fragmentRoot, router })
+        .then(value => ({ value }), error => ({ error }))
     });
-    options.log?.(`${source.id}: checkpointed ${batch.label || batch.id} (${completed.size.toLocaleString()} jobs complete)`);
+    return true;
+  };
+  for (let slot = 0; slot < concurrency; slot++) {
+    if (!await launch()) break;
   }
+  options.log?.(`${source.id}: partitioning with ${Math.max(1, active.length).toLocaleString()} concurrent job${active.length === 1 ? "" : "s"}`);
+  try {
+    while (active.length) {
+      const task = active.shift();
+      const outcome = await task.promise;
+      if (outcome.error) throw outcome.error;
+      const result = outcome.value;
+      await appendBatchFragments(result, source, {
+        partial,
+        progressPath,
+        completed,
+        counts,
+        stats,
+        routingIdentity,
+        log: options.log,
+        afterAppend: options.afterBatchAppend
+      });
+      await launch();
+    }
+  } catch (error) {
+    await iterator.return?.();
+    await Promise.allSettled(active.map(task => task.promise));
+    rmSync(fragmentRoot, { recursive: true, force: true });
+    throw error;
+  }
+  rmSync(fragmentRoot, { recursive: true, force: true });
 
   const meta = {
     schemaVersion: SPATIAL_PARTITION_SCHEMA_VERSION,
@@ -662,7 +788,12 @@ export async function partitionAddressSourceSpatially(source, options) {
   const routingIdentity = createHash("sha256").update(stableJson({
     schema: SPATIAL_PARTITION_SCHEMA_VERSION,
     source: source.identity,
-    regions: regions.map(region => ({ id: region.id, bbox: region.bbox }))
+    regions: regions.map(region => ({
+      id: region.id,
+      bbox: region.bbox,
+      countryCodes: region.countryCodes,
+      subdivisionCodes: region.subdivisionCodes
+    }))
   })).digest("hex");
   const prior = readJson(metaPath, null);
   if (prior?.identity === routingIdentity && prior?.regions
@@ -688,7 +819,7 @@ export async function partitionAddressSourceSpatially(source, options) {
       const record = options.normalizeRecord(mapped, source.defaults);
       if (!record || (typeof source.filter === "function" && !source.filter(record, raw))) continue;
       stats.normalized++;
-      const matches = router.route(record.lat, record.lon);
+      const matches = router.route(record.lat, record.lon, record);
       if (!matches.length) {
         stats.unmatched++;
         continue;
