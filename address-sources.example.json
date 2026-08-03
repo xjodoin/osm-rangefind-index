@@ -1,0 +1,68 @@
+{
+  "sources": [
+    {
+      "id": "geonames-global-postal",
+      "name": "GeoNames worldwide postal codes",
+      "url": "https://download.geonames.org/export/zip/allCountries.zip",
+      "website": "https://download.geonames.org/export/zip/",
+      "format": "delimited",
+      "compression": "zip",
+      "archiveEntry": "allCountries.txt",
+      "delimiter": "\t",
+      "header": false,
+      "defaults": {
+        "kind": "postal_code"
+      },
+      "mapping": {
+        "country": 0,
+        "postcode": 1,
+        "city": 2,
+        "state": 4,
+        "lat": 9,
+        "lon": 10
+      },
+      "includeAddresses": false,
+      "license": "CC-BY-4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attribution": "GeoNames",
+      "appliesTo": {
+        "excludeGroups": ["canada"]
+      },
+      "partition": {
+        "mode": "spatial"
+      }
+    },
+    {
+      "id": "geonames-ca-full",
+      "name": "GeoNames Canadian postal codes",
+      "url": "https://download.geonames.org/export/zip/CA_full.csv.zip",
+      "website": "https://download.geonames.org/export/zip/",
+      "format": "delimited",
+      "compression": "zip",
+      "archiveEntry": "CA_full.txt",
+      "delimiter": "\t",
+      "header": false,
+      "defaults": {
+        "kind": "postal_code"
+      },
+      "mapping": {
+        "country": 0,
+        "postcode": 1,
+        "city": 2,
+        "state": 4,
+        "lat": 9,
+        "lon": 10
+      },
+      "includeAddresses": false,
+      "license": "CC-BY-4.0",
+      "licenseUrl": "https://creativecommons.org/licenses/by/4.0/",
+      "attribution": "GeoNames",
+      "appliesTo": {
+        "groups": ["canada"]
+      },
+      "partition": {
+        "mode": "spatial"
+      }
+    }
+  ]
+}

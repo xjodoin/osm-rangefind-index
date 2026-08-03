@@ -51,7 +51,7 @@ import { fork, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { availableParallelism, hostname } from "node:os";
 import { pipeline } from "node:stream/promises";
 import { createGunzip, createGzip } from "node:zlib";
@@ -63,7 +63,7 @@ import { writeShardedRootManifest } from "rangefind/shards";
 // publish a fan-out root (no text_routing block) instead of failing.
 import * as rangefindShards from "rangefind/shards";
 import { readConfig } from "rangefind/config";
-import { createOsmIndexConfig } from "rangefind/osm/node";
+import * as rangefindOsmNode from "rangefind/osm/node";
 import { extractOsmPlaces } from "rangefind/osm/extract";
 import { createR2Store, listLocalFiles } from "./lib/r2_store.mjs";
 import { acquireProcessLock } from "./lib/process_lock.mjs";
@@ -87,14 +87,27 @@ import {
   loadCategoryLexiconModule,
   mergeShardTypeVocabulary
 } from "./lib/category_lexicon.mjs";
+import {
+  additionalSourceMetadata,
+  addressSourceAdapterOptions,
+  addressSourcesForRegion,
+  loadAddressSourcesConfig,
+  partitionAddressSourceSpatially,
+  prepareAddressSource,
+  regionAddressSourceIdentity,
+  spatialPartitionForRegion
+} from "./lib/address_sources.mjs";
+
+const { createOsmIndexConfig } = rangefindOsmNode;
 
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const ADDRESS_SOURCES = loadAddressSourcesConfig(projectRoot);
 const taskRequire = createRequire(import.meta.url);
 const RANGEFIND_VERSION = taskRequire("rangefind/package.json").version;
 // Runtime-only releases must not invalidate every published shard. Keep this
 // at the newest Rangefind release that changed builder output or analysis
 // semantics, and bump it deliberately when artifacts really must be rebuilt.
-const RANGEFIND_BUILDER_VERSION = "0.3.24";
+const RANGEFIND_BUILDER_VERSION = "0.4.1";
 const WORK = join(projectRoot, "work");
 const OUT = join(WORK, "public/rangefind");
 const STATE_PATH = join(WORK, "state.json");
@@ -206,7 +219,11 @@ function loadRegions(args) {
         pinned: Boolean(region.pbf),
         groups: Array.isArray(region.groups) ? region.groups.map(String) : [],
         bbox,
-        overrides: region.overrides || null
+        overrides: region.overrides || null,
+        addressSources: addressSourcesForRegion(ADDRESS_SOURCES.sources, {
+          id: String(region.id),
+          groups: Array.isArray(region.groups) ? region.groups.map(String) : []
+        })
       };
     })
     .filter(region => region.id && (!args.regions || args.regions.includes(region.id)));
@@ -262,8 +279,14 @@ function regionWorkRoot(region) {
   return join(WORK, "regions", region.id);
 }
 
-function regionJsonl(region) {
+function regionOsmJsonl(region) {
   return join(regionWorkRoot(region), "data/osm-places.jsonl");
+}
+
+function regionJsonl(region) {
+  return region.addressSources?.length
+    ? join(regionWorkRoot(region), "data/osm-enriched-places.jsonl")
+    : regionOsmJsonl(region);
 }
 
 function regionJsonlGz(region) {
@@ -331,6 +354,10 @@ function cleanupExtractionScratch(region) {
   if (files) {
     log(`${region.id}: cleaned ${files} extractor scratch file(s) (${(bytes / 1024 / 1024).toFixed(1)} MiB)`);
   }
+  const rawOsm = regionOsmJsonl(region);
+  if (rawOsm !== regionJsonl(region) && existsSync(rawOsm) && existsSync(regionJsonl(region))) {
+    rmSync(rawOsm, { force: true });
+  }
 }
 
 // Identity of a region's current upstream corpus — stable across
@@ -342,6 +369,59 @@ function pbfIdentity(region, state) {
 }
 
 // --- step 1: refresh PBFs ----------------------------------------------------
+
+const addressSourcePreparations = new Map();
+const addressSourcePartitions = new Map();
+
+async function prepareRegionAddressSources(region, regions) {
+  if (!region.addressSources?.length) {
+    region.preparedAddressSources = [];
+    region.enrichmentIdentity = "";
+    return;
+  }
+  const prepared = await Promise.all(region.addressSources.map(source => {
+    if (!addressSourcePreparations.has(source.id)) {
+      const preparation = prepareAddressSource(source, {
+        root: join(WORK, "address-sources"),
+        fetchSource,
+        timeoutMs: SOURCE_REQUEST_TIMEOUT_MS,
+        log
+      }).catch(error => {
+        addressSourcePreparations.delete(source.id);
+        throw error;
+      });
+      addressSourcePreparations.set(source.id, preparation);
+    }
+    return addressSourcePreparations.get(source.id);
+  }));
+  region.preparedAddressSources = (await Promise.all(prepared.map(async source => {
+    if (source.partition?.mode !== "spatial") return source;
+    if (typeof rangefindOsmNode.createDelimitedAddressSource !== "function"
+        || typeof rangefindOsmNode.normalizeExternalAddressRecord !== "function") {
+      throw new Error(`${region.id}: spatial address partitioning requires the current Rangefind address-enrichment API.`);
+    }
+    if (!addressSourcePartitions.has(source.id)) {
+      const sourceRegions = regions.filter(candidate => (
+        candidate.addressSources?.some(candidateSource => candidateSource.id === source.id)
+      ));
+      const adapter = rangefindOsmNode.createDelimitedAddressSource(
+        addressSourceAdapterOptions(source, region)
+      );
+      const partition = partitionAddressSourceSpatially(adapter, {
+        root: join(WORK, "address-sources", source.id, "partitions"),
+        regions: sourceRegions,
+        normalizeRecord: rangefindOsmNode.normalizeExternalAddressRecord,
+        log
+      }).catch(error => {
+        addressSourcePartitions.delete(source.id);
+        throw error;
+      });
+      addressSourcePartitions.set(source.id, partition);
+    }
+    return spatialPartitionForRegion(source, await addressSourcePartitions.get(source.id), region);
+  }))).filter(Boolean);
+  region.enrichmentIdentity = regionAddressSourceIdentity(region.preparedAddressSources);
+}
 
 async function refreshPbf(region, state) {
   if (region.pinned) {
@@ -362,8 +442,11 @@ async function refreshPbf(region, state) {
   // upstream changed, or when extraction still needs it (stale/lost
   // extraction state) and the file is gone.
   const current = lastModified && lastModified === entry.pbfLastModified;
+  const enrichmentCurrent = !region.addressSources?.length
+    || (entry.enrichmentIdentity || "") === (region.enrichmentIdentity || "");
   const extractionCurrent = entry.extractIdentity === lastModified
     && entry.extractSchema === OSM_EXTRACTION_SCHEMA_VERSION
+    && enrichmentCurrent
     && hasCorpus(region);
   if (current && (existsSync(region.pbf) || extractionCurrent)) return { bytes: bytes || entry.pbfBytes || 0 };
 
@@ -399,8 +482,10 @@ async function refreshPbf(region, state) {
 async function extractJsonl(region, state) {
   const entry = state.regions[region.id] || (state.regions[region.id] = {});
   const identity = pbfIdentity(region, state);
+  const enrichmentIdentity = region.enrichmentIdentity || "";
   if (entry.extractIdentity === identity
     && entry.extractSchema === OSM_EXTRACTION_SCHEMA_VERSION
+    && (entry.enrichmentIdentity || "") === enrichmentIdentity
     && hasCorpus(region)) return false;
   if (!existsSync(region.pbf)) {
     throw new Error(`${region.id}: corpus is stale but the PBF is missing (refresh failed?)`);
@@ -408,18 +493,42 @@ async function extractJsonl(region, state) {
   // The compressed snapshot stays: it is the corpus the built shard
   // reflects and the base the delta diff runs against. Cleanup replaces it
   // only after the shard is rebuilt/updated and uploaded.
-  const meta = await extractOsmPlaces({
+  const osmMeta = await extractOsmPlaces({
     region: region.id,
     pbf: region.pbf,
     root: regionWorkRoot(region),
     rqa: false
   });
-  if (Number(meta.schemaVersion) !== OSM_EXTRACTION_SCHEMA_VERSION) {
-    throw new Error(`${region.id}: Rangefind OSM extraction schema ${meta.schemaVersion || "unknown"}; expected ${OSM_EXTRACTION_SCHEMA_VERSION}`);
+  if (Number(osmMeta.schemaVersion) !== OSM_EXTRACTION_SCHEMA_VERSION) {
+    throw new Error(`${region.id}: Rangefind OSM extraction schema ${osmMeta.schemaVersion || "unknown"}; expected ${OSM_EXTRACTION_SCHEMA_VERSION}`);
   }
-  entry.docs = Number(meta.docs || 0);
+  let meta = osmMeta;
+  if (region.preparedAddressSources?.length) {
+    if (typeof rangefindOsmNode.augmentOsmWithAddressSources !== "function"
+        || typeof rangefindOsmNode.createDelimitedAddressSource !== "function"
+        || typeof rangefindOsmNode.createJsonlAddressSource !== "function") {
+      throw new Error(`${region.id}: configured address enrichment requires a Rangefind release with augmentOsmWithAddressSources().`);
+    }
+    const sources = region.preparedAddressSources.map(source => (
+      source.format === "jsonl"
+        ? rangefindOsmNode.createJsonlAddressSource(addressSourceAdapterOptions(source, region))
+        : rangefindOsmNode.createDelimitedAddressSource(addressSourceAdapterOptions(source, region))
+    ));
+    const enriched = await rangefindOsmNode.augmentOsmWithAddressSources({
+      root: regionWorkRoot(region),
+      osmPath: regionOsmJsonl(region),
+      outputPath: regionJsonl(region),
+      sources,
+      osmDocs: Number(osmMeta.docs || 0),
+      log: line => log(`${region.id}: ${line}`)
+    });
+    meta = enriched.meta;
+  }
+  entry.docs = Number(meta.totalDocs ?? meta.docs ?? 0);
   entry.extractIdentity = identity;
   entry.extractSchema = OSM_EXTRACTION_SCHEMA_VERSION;
+  entry.enrichmentIdentity = enrichmentIdentity;
+  entry.additionalSources = additionalSourceMetadata(region.preparedAddressSources || []);
   entry.overrides = region.overrides || null;
   return true;
 }
@@ -489,6 +598,7 @@ function shardConfig(region, options, scoringStatsPath, input = null, state = nu
     input: input || regionJsonl(region),
     output: join(OUT, "shards", region.id),
     buildProgressLogMs: 60000,
+    additionalSources: entry.additionalSources || [],
     // Provenance stamped into the shard manifest on top of the OSM
     // attribution defaults: who built it, from which upstream file, and the
     // data vintage (Geofabrik Last-Modified — distinct from built_at).
@@ -1211,7 +1321,7 @@ async function cleanupRegion(region, state) {
   if (!region.pinned) rmSync(region.pbf, { force: true });
   await compressJsonl(region);
   const dataDir = join(regionWorkRoot(region), "data");
-  const keep = new Set(["osm-places.jsonl.gz", "osm-places.meta.json"]);
+  const keep = new Set([`${basename(regionJsonl(region))}.gz`, "osm-places.meta.json"]);
   if (existsSync(dataDir)) {
     for (const name of readdirSync(dataDir)) {
       if (!keep.has(name)) rmSync(join(dataDir, name), { recursive: true, force: true });
@@ -1384,6 +1494,7 @@ async function main() {
         activeRegions.add(region.id);
         reportAcquisition(region);
         try {
+          await prepareRegionAddressSources(region, regions);
           const source = await refreshPbf(region, state);
           const large = source.bytes >= options.largePbfBytes;
           if (large) {

@@ -25,6 +25,45 @@ Requires: Node ≥ 22 and disk ≈ the largest single region's PBF + corpus +
 built shard (steady state is far smaller — see Disk usage) (PBFs + JSONL +
 build temp + index). No external object-storage CLI is required.
 
+## Optional address and postal authorities
+
+The OSM corpus can be augmented by any licensed civic-address or postal-code
+authority without adding a server-side search dependency. Copy
+`address-sources.example.json` to `address-sources.json` (or set
+`ADDRESS_SOURCES_CONFIG`) to enable sources. The included example combines the
+GeoNames worldwide postal dump with its denser full Canadian authority file.
+Both are streamed once and spatially partitioned across the matching shards;
+Canada is excluded from the global layer so records are not counted twice.
+
+The configuration is provider-neutral: it declares a URL, compression,
+CSV/TSV field mapping, defaults, attribution, applicable region groups, and an
+optional explicit or coordinate-based shard partition. A worldwide file
+downloads once into `work/address-sources/` and is converted in one pass to
+canonical per-shard JSONL, avoiding hundreds of rescans. Every matching region
+then streams its thin partition through the same enrichment engine. Code adapters can use the lower-level
+async-record API for OpenAddresses GeoJSON, a national register, a database,
+or an application-owned feed.
+
+Sources are applied in configuration order. The engine:
+
+- suppresses canonical civic duplicates against OSM and earlier providers;
+- groups all samples for a country/postcode into one searchable postal result;
+- records centroid, bounds, primary locality, aliases, sample/address counts,
+  and source provenance;
+- keeps residential records out of BM25, autocomplete, and map-browse lanes;
+- includes source identity in each shard fingerprint, so a provider refresh
+  rebuilds only affected shards;
+- publishes every source attribution in the shard manifest.
+
+OpenAddresses is particularly useful as an address provider. Its normalized
+Canada source is based on Statistics Canada's National Address Register. For
+a thin postal-only layer, the GeoNames example is substantially cheaper; for
+full civic coverage, configure the OpenAddresses/NAR CSV fields as
+`houseNumber`, `street`, `unit`, `city`, `state`, `postcode`, `country`, `lat`,
+and `lon`, then retain `includeAddresses: true`. Spatial partitioning is
+provider-neutral and routes any normalized coordinate into every overlapping
+OSM shard coverage box, including antimeridian-spanning regions.
+
 ## The shard set
 
 `regions.json` ships with the **full planet: 310 shards** (187 countries

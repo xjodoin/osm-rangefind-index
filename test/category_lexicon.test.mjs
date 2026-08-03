@@ -29,6 +29,7 @@ test("installed OSM builder enables category-cell routing and geo capsules", () 
     blockZoom: 9,
     codeGroupSize: 16,
     maxCellsPerQuery: 48,
+    includeAll: true,
     values: config.filterBitmapFacetValues.type
   }]);
 });

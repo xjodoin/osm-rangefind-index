@@ -44,6 +44,23 @@ test("builder upgrades invalidate shards without invalidating unchanged routing 
   );
 });
 
+test("external address authority updates invalidate only affected shard content", () => {
+  const base = {
+    extractIdentity: "pbf-v1",
+    extractSchema: 9,
+    docs: 42
+  };
+  const before = buildContentFingerprint({
+    entry: { ...base, enrichmentIdentity: "postal-v1" },
+    statsFingerprint: "100:200"
+  });
+  const after = buildContentFingerprint({
+    entry: { ...base, enrichmentIdentity: "postal-v2" },
+    statsFingerprint: "100:200"
+  });
+  assert.notEqual(before, after);
+});
+
 test("region-scoped production publication retains the complete root", () => {
   const selected = [{ id: "quebec" }];
   const all = [{ id: "quebec" }, { id: "ontario" }];

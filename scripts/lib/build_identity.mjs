@@ -1,5 +1,5 @@
 export function buildContentFingerprint({ entry = {}, statsFingerprint, overrides = null }) {
-  return `${entry.extractIdentity || "?"}:${entry.extractSchema || 0}:${entry.docs || 0}:${statsFingerprint}:${JSON.stringify(overrides)}`;
+  return `${entry.extractIdentity || "?"}:${entry.extractSchema || 0}:${entry.enrichmentIdentity || ""}:${entry.docs || 0}:${statsFingerprint}:${JSON.stringify(overrides)}`;
 }
 
 export function buildShardFingerprint({ rangefindVersion, builderVersion = rangefindVersion, contentFingerprint }) {
