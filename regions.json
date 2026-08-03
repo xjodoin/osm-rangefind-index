@@ -4141,6 +4141,7 @@
   "statsDriftRatio": 0.1,
   "workerCount": 0,
   "partitionReducerWorkers": 4,
+  "codeStoreWorkerPreloadMaxBytes": 3221225472,
   "acquisitionConcurrency": 2,
   "largePbfBytes": 1073741824,
   "publisher": "",

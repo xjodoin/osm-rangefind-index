@@ -106,8 +106,10 @@ alone to protect memory on the 31 GiB production host. Stats and shard builds
 remain sequential; each shard build already uses the configured CPU worker
 pool. `partitionReducerWorkers` is capped separately (default `4`) because
 each reducer owns a bounded code-store preload; this keeps large shards out of
-memory reclaim without reducing scan/extraction parallelism. Direct R2 uploads
-preserve packs-before-generation-manifests-before-root-
+memory reclaim without reducing scan/extraction parallelism. The shipped
+`codeStoreWorkerPreloadMaxBytes` is 3 GiB so large OSM filter stores use one
+shared sequential preload instead of per-worker random reads. Direct R2
+uploads preserve packs-before-generation-manifests-before-root-
 manifest ordering for every shard.
 
 Rough planet budget on a modern 12–16-core box: ~78 GiB of downloads

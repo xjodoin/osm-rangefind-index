@@ -237,6 +237,13 @@ function loadRegions(args) {
     // sustained cgroup reclaim. Keep scan parallelism high, but give reduction
     // its own deliberately smaller pool.
     partitionReducerWorkers: Math.max(1, Number(config.partitionReducerWorkers) || 4),
+    // The production OSM schema has enough filter columns that a large shard's
+    // code store can exceed Rangefind's conservative 1.5 GiB default. A shared
+    // preload avoids hundreds of millions of tiny random reads and is allocated
+    // once for the reducer pool, not once per worker.
+    codeStoreWorkerPreloadMaxBytes: Number.isFinite(Number(config.codeStoreWorkerPreloadMaxBytes))
+      ? Math.max(0, Number(config.codeStoreWorkerPreloadMaxBytes))
+      : 3 * 1024 ** 3,
     acquisitionConcurrency: Math.max(1, Math.min(4, Number(config.acquisitionConcurrency || 1))),
     largePbfBytes: Math.max(1, Number(config.largePbfBytes || 1024 ** 3)),
     publisher: String(config.publisher || ""),
@@ -617,6 +624,7 @@ function shardConfig(region, options, scoringStatsPath, input = null, state = nu
     },
     overrides: {
       partitionReducerWorkers,
+      codeStoreWorkerPreloadMaxBytes: options.codeStoreWorkerPreloadMaxBytes,
       ...(region.overrides || {}),
       ...(scoringStatsPath ? { scoringStats: scoringStatsPath } : {})
     }
