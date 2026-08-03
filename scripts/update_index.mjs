@@ -107,7 +107,7 @@ const RANGEFIND_VERSION = taskRequire("rangefind/package.json").version;
 // Runtime-only releases must not invalidate every published shard. Keep this
 // at the newest Rangefind release that changed builder output or analysis
 // semantics, and bump it deliberately when artifacts really must be rebuilt.
-const RANGEFIND_BUILDER_VERSION = "0.4.2";
+const RANGEFIND_BUILDER_VERSION = "0.4.3";
 const WORK = join(projectRoot, "work");
 const OUT = join(WORK, "public/rangefind");
 const STATE_PATH = join(WORK, "state.json");
@@ -118,10 +118,11 @@ const SOURCE_REQUEST_TIMEOUT_MS = Math.max(
   1_000,
   Number(process.env.SOURCE_REQUEST_TIMEOUT_MS || 30_000)
 );
-// Rangefind 0.4.0 added route/search fields to normalized OSM documents.
-// Keep this in the orchestrator identity so a package upgrade cannot reuse a
-// corpus produced by an older extractor before extractOsmPlaces sees it.
-const OSM_EXTRACTION_SCHEMA_VERSION = 10;
+// Keep this synchronized with Rangefind's PBF extraction schema so a package
+// upgrade cannot reuse a corpus produced by an older extractor before
+// extractOsmPlaces sees it. Schema 11 adds normalized alternate names and
+// fallback identities.
+const OSM_EXTRACTION_SCHEMA_VERSION = 11;
 
 function parseArgs(argv) {
   const args = {
