@@ -118,10 +118,10 @@ const SOURCE_REQUEST_TIMEOUT_MS = Math.max(
   1_000,
   Number(process.env.SOURCE_REQUEST_TIMEOUT_MS || 30_000)
 );
-// Rangefind 0.3.6 locality enrichment changed normalized OSM documents.
+// Rangefind 0.4.0 added route/search fields to normalized OSM documents.
 // Keep this in the orchestrator identity so a package upgrade cannot reuse a
 // corpus produced by an older extractor before extractOsmPlaces sees it.
-const OSM_EXTRACTION_SCHEMA_VERSION = 9;
+const OSM_EXTRACTION_SCHEMA_VERSION = 10;
 
 function parseArgs(argv) {
   const args = {
