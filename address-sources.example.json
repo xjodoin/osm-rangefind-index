@@ -1,6 +1,24 @@
 {
   "sources": [
     {
+      "id": "openaddresses-global",
+      "name": "OpenAddresses worldwide civic addresses",
+      "provider": "openaddresses-batch",
+      "apiUrl": "https://batch.openaddresses.io/api",
+      "tokenEnv": "OPENADDRESSES_TOKEN",
+      "refreshIntervalHours": 168,
+      "website": "https://openaddresses.io/",
+      "includeAddresses": true,
+      "includeUnits": false,
+      "includeCountry": true,
+      "license": "Varies by original source; linked on every imported record",
+      "licenseUrl": "https://github.com/openaddresses/openaddresses#data-license",
+      "attribution": "OpenAddresses and its original data publishers",
+      "partition": {
+        "mode": "spatial"
+      }
+    },
+    {
       "id": "geonames-global-postal",
       "name": "GeoNames worldwide postal codes",
       "url": "https://download.geonames.org/export/zip/allCountries.zip",

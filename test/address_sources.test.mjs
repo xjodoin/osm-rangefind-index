@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { gunzipSync, gzipSync } from "node:zlib";
 import {
   additionalSourceMetadata,
   addressSourceAdapterOptions,
@@ -155,6 +156,121 @@ test("worldwide sources partition once across conventional, overlapping, and wra
     const west = spatialPartitionForRegion({ ...source, path: join(root, "source.zip") }, partition, regions[0]);
     assert.equal(JSON.parse(await readFile(west.path, "utf8")).postcode, "H2X 1Y4");
     assert.equal(west.format, "jsonl");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("OpenAddresses streams authenticated jobs into compressed worldwide partitions with provenance", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rangefind-openaddresses-"));
+  const priorToken = process.env.OPENADDRESSES_TEST_TOKEN;
+  process.env.OPENADDRESSES_TEST_TOKEN = "secret-test-token";
+  try {
+    const path = join(root, "address-sources.json");
+    await writeFile(path, JSON.stringify({
+      sources: [{
+        id: "openaddresses-global",
+        name: "OpenAddresses",
+        provider: "openaddresses-batch",
+        apiUrl: "https://batch.example.test/api",
+        tokenEnv: "OPENADDRESSES_TEST_TOKEN",
+        refreshIntervalHours: 168,
+        includeAddresses: true,
+        partition: { mode: "spatial" }
+      }]
+    }));
+    const [source] = loadAddressSourcesConfig(root, path).sources;
+    const catalog = [{
+      source: "ca/qc/test",
+      updated: 1785700000000,
+      layer: "addresses",
+      name: "province",
+      job: 123,
+      output: { output: true },
+      size: 42
+    }];
+    const features = [
+      { type: "Feature", properties: { hash: "one", number: "214", street: "Rue Libersan", city: "Sainte-Thérèse", region: "QC", postcode: "J7E 3X4" }, geometry: { type: "Point", coordinates: [-73.83, 45.64] } },
+      { type: "Feature", properties: { hash: "two", number: "10", street: "Main St", city: "Windsor", region: "ON", postcode: "N9A 1A1" }, geometry: { type: "Point", coordinates: [-83.02, 42.3] } }
+    ];
+    const calls = [];
+    const fetchSource = async (url, init = {}) => {
+      const value = String(url);
+      calls.push({ value, redirect: init.redirect });
+      if (value.endsWith("/data?layer=addresses")) return Response.json(catalog);
+      assert.match(value, /token=secret-test-token/u);
+      if (init.redirect === "manual") return new Response(null, { status: 302, headers: { location: "https://cdn.example.test/job.gz" } });
+      const jsonl = `${features.map(feature => JSON.stringify(feature)).join("\n")}\n`;
+      return new Response(gzipSync(jsonl), { status: 200 });
+    };
+    const prepared = await prepareAddressSource(source, { root, fetchSource, timeoutMs: 1000 });
+    assert.equal(prepared.identity.jobs, 1);
+    assert.doesNotMatch(await readFile(prepared.path, "utf8"), /secret-test-token/u);
+    const regions = [
+      { id: "quebec", bbox: [44, -80, 63, -57] },
+      { id: "ontario", bbox: [41, -96, 57, -74] }
+    ];
+    const partition = await partitionAddressSourceSpatially(prepared, {
+      root: join(root, "partitions"),
+      regions,
+      normalizeRecord: record => ({ ...record, lat: Number(record.lat), lon: Number(record.lon) })
+    });
+    assert.equal(partition.compression, "gzip");
+    assert.equal(partition.batches, 1);
+    assert.equal(partition.regions.quebec, 1);
+    assert.equal(partition.regions.ontario, 1);
+    const quebec = spatialPartitionForRegion(prepared, partition, regions[0]);
+    const [record] = gunzipSync(await readFile(quebec.path))
+      .toString("utf8").trim().split("\n").map(JSON.parse);
+    assert.equal(record.id, "ca/qc/test/addresses/province/one");
+    assert.equal(record.country, "CA");
+    assert.match(record.url, /sources\/ca\/qc\/test\.json$/u);
+    assert.equal(quebec.compression, "gzip");
+    assert.equal(calls.length, 3);
+  } finally {
+    if (priorToken == null) delete process.env.OPENADDRESSES_TEST_TOKEN;
+    else process.env.OPENADDRESSES_TEST_TOKEN = priorToken;
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("batched spatial partitioning resumes after the last durable job without duplicate rows", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rangefind-address-resume-"));
+  try {
+    const region = { id: "quebec", bbox: [44, -80, 63, -57] };
+    let failSecond = true;
+    const visited = [];
+    const source = {
+      id: "resumable-global",
+      identity: { snapshot: "v1", config: "v1" },
+      async *batches(completed) {
+        for (const id of ["job-a", "job-b"]) {
+          if (completed.has(id)) continue;
+          visited.push(id);
+          yield {
+            id,
+            records: (async function *records() {
+              yield { id, houseNumber: "1", street: id, country: "CA", lat: 45, lon: -74 };
+              if (id === "job-b" && failSecond) throw new Error("interrupted download");
+            })()
+          };
+        }
+      }
+    };
+    const options = {
+      root: join(root, "partitions"),
+      regions: [region],
+      normalizeRecord: record => record
+    };
+    await assert.rejects(partitionAddressSourceSpatially(source, options), /interrupted download/u);
+    failSecond = false;
+    const partition = await partitionAddressSourceSpatially(source, options);
+    assert.deepEqual(visited, ["job-a", "job-b", "job-b"]);
+    assert.equal(partition.rowsRead, 2);
+    assert.equal(partition.regions.quebec, 2);
+    const shard = spatialPartitionForRegion(source, partition, region);
+    const rows = gunzipSync(await readFile(shard.path)).toString("utf8").trim().split("\n");
+    assert.equal(rows.length, 2);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

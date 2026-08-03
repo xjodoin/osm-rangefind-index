@@ -30,14 +30,20 @@ build temp + index). No external object-storage CLI is required.
 The OSM corpus can be augmented by any licensed civic-address or postal-code
 authority without adding a server-side search dependency. Copy
 `address-sources.example.json` to `address-sources.json` (or set
-`ADDRESS_SOURCES_CONFIG`) to enable sources. The included example combines the
-GeoNames worldwide postal dump with its denser full Canadian authority file.
-Both are streamed once and spatially partitioned across the matching shards;
-Canada is excluded from the global layer so records are not counted twice.
+`ADDRESS_SOURCES_CONFIG`) to enable sources. The included production example
+combines current OpenAddresses civic addresses worldwide with GeoNames postal
+centroids and its denser Canadian postal file. Create a free OpenAddresses API
+token and set `OPENADDRESSES_TOKEN`; the token is used only for authenticated
+downloads and is never placed in index state, manifests, or logs.
 
-The configuration is provider-neutral: it declares a URL, compression,
+The configuration is provider-neutral: ordinary files declare a URL, compression,
 CSV/TSV field mapping, defaults, attribution, applicable region groups, and an
-optional explicit or coordinate-based shard partition. A worldwide file
+optional explicit or coordinate-based shard partition. The built-in
+`openaddresses-batch` provider consumes the live normalized address catalog as
+bounded per-source gzip jobs instead of staging the roughly 72 GB global ZIP.
+Each completed job is checkpointed and appended as a valid gzip member to the
+matching shard partitions, so interruption repeats at most one source job and
+disk use stays close to the compressed regional output. A worldwide file
 downloads once into `work/address-sources/` and is converted in one pass to
 canonical per-shard JSONL, avoiding hundreds of rescans. Every matching region
 then streams its thin partition through the same enrichment engine. Code adapters can use the lower-level
@@ -55,14 +61,16 @@ Sources are applied in configuration order. The engine:
   rebuilds only affected shards;
 - publishes every source attribution in the shard manifest.
 
-OpenAddresses is particularly useful as an address provider. Its normalized
-Canada source is based on Statistics Canada's National Address Register. For
-a thin postal-only layer, the GeoNames example is substantially cheaper; for
-full civic coverage, configure the OpenAddresses/NAR CSV fields as
-`houseNumber`, `street`, `unit`, `city`, `state`, `postcode`, `country`, `lat`,
-and `lon`, then retain `includeAddresses: true`. Spatial partitioning is
-provider-neutral and routes any normalized coordinate into every overlapping
-OSM shard coverage box, including antimeridian-spanning regions.
+OpenAddresses is particularly useful as an address provider. The integration
+uses every current worldwide `addresses` job, assigns collision-safe IDs,
+links each record back to its exact OpenAddresses source definition (where the
+original publisher and license are declared), and derives the country from the
+source namespace. Sources are refreshed weekly by default so a continuously
+running indexer does not repartition the planet every night; change
+`refreshIntervalHours` when a different cadence is appropriate. For a thin
+postal-only layer, GeoNames remains substantially cheaper. Spatial partitioning
+routes either provider into every overlapping OSM shard coverage box, including
+antimeridian-spanning regions.
 
 ## The shard set
 

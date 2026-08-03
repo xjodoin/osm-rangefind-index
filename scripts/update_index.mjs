@@ -416,9 +416,11 @@ async function prepareRegionAddressSources(region, regions) {
       const sourceRegions = regions.filter(candidate => (
         candidate.addressSources?.some(candidateSource => candidateSource.id === source.id)
       ));
-      const adapter = rangefindOsmNode.createDelimitedAddressSource(
-        addressSourceAdapterOptions(source, region)
-      );
+      const adapter = typeof source.batches === "function"
+        ? source
+        : rangefindOsmNode.createDelimitedAddressSource(
+          addressSourceAdapterOptions(source, region)
+        );
       const partition = partitionAddressSourceSpatially(adapter, {
         root: join(WORK, "address-sources", source.id, "partitions"),
         regions: sourceRegions,

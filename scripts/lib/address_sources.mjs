@@ -8,11 +8,17 @@ import {
   renameSync,
   rmSync,
   statSync,
+  truncateSync,
   writeFileSync,
   writeSync
 } from "node:fs";
 import { createHash } from "node:crypto";
+import { once } from "node:events";
 import { basename, dirname, extname, join, resolve } from "node:path";
+import { Readable } from "node:stream";
+import { finished } from "node:stream/promises";
+import { createInterface } from "node:readline";
+import { createGunzip, createGzip } from "node:zlib";
 
 function clean(value) {
   return String(value ?? "").trim();
@@ -44,6 +50,13 @@ function configFingerprint(source) {
   const relevant = {
     id: source.id,
     name: source.name,
+    provider: source.provider,
+    apiUrl: source.apiUrl,
+    tokenEnv: source.tokenEnv,
+    refreshIntervalHours: source.refreshIntervalHours,
+    downloadAttempts: source.downloadAttempts,
+    downloadIdleTimeoutMs: source.downloadIdleTimeoutMs,
+    partitionCompressionLevel: source.partitionCompressionLevel,
     url: source.url,
     website: source.website,
     format: source.format,
@@ -66,15 +79,32 @@ function configFingerprint(source) {
 }
 
 function validateSource(raw) {
+  const provider = clean(raw.provider || "file").toLowerCase();
   const source = {
     ...raw,
     id: safeId(raw.id),
     url: clean(raw.url),
     name: clean(raw.name) || safeId(raw.id),
     format: clean(raw.format || "delimited"),
+    provider,
     enabled: raw.enabled !== false
   };
+  if (provider === "openaddresses-batch") {
+    source.apiUrl = clean(raw.apiUrl || "https://batch.openaddresses.io/api").replace(/\/+$/u, "");
+    source.tokenEnv = clean(raw.tokenEnv || "OPENADDRESSES_TOKEN");
+    source.format = "openaddresses-geojsonl";
+    source.url ||= "https://openaddresses.io/";
+    if (!source.tokenEnv) throw new Error(`Address source ${source.id} has no token environment variable.`);
+  } else if (provider !== "file") {
+    throw new Error(`Address source ${source.id}: unsupported provider ${JSON.stringify(provider)}.`);
+  }
   if (!source.url) throw new Error(`Address source ${source.id} has no URL.`);
+  if (provider === "openaddresses-batch") {
+    if (source.partition?.mode !== "spatial") {
+      throw new Error(`Address source ${source.id}: OpenAddresses requires partition.mode=spatial.`);
+    }
+    return source;
+  }
   if (source.format !== "delimited") {
     throw new Error(`Address source ${source.id}: production JSON config currently supports format=delimited; code adapters can use the Rangefind async-iterator API.`);
   }
@@ -126,6 +156,186 @@ function extensionFor(source) {
   return extension && extension.length <= 8 ? extension : ".data";
 }
 
+function metadataIdentity(entries, source) {
+  const snapshot = entries.map(entry => ({
+    source: entry.source,
+    layer: entry.layer,
+    name: entry.name,
+    job: entry.job,
+    updated: entry.updated,
+    size: entry.size
+  }));
+  return {
+    snapshot: createHash("sha256").update(stableJson(snapshot)).digest("hex"),
+    jobs: snapshot.length,
+    bytes: snapshot.reduce((total, entry) => total + Math.max(0, Number(entry.size) || 0), 0),
+    config: configFingerprint(source)
+  };
+}
+
+function openAddressesJobKey(entry) {
+  return `${entry.job}:${entry.updated || 0}`;
+}
+
+function openAddressesSourceUrl(entry) {
+  const path = clean(entry.source).split("/").map(encodeURIComponent).join("/");
+  return `https://github.com/openaddresses/openaddresses/blob/master/sources/${path}.json`;
+}
+
+function redactSecret(value, secret) {
+  const message = clean(value);
+  if (!secret) return message;
+  return message
+    .split(secret).join("[REDACTED]")
+    .split(encodeURIComponent(secret)).join("[REDACTED]");
+}
+
+function openAddressesRecord(feature, entry) {
+  const coordinates = feature?.geometry?.type === "Point" ? feature.geometry.coordinates : null;
+  const properties = feature?.properties || {};
+  if (!Array.isArray(coordinates) || coordinates.length < 2) return null;
+  const country = clean(entry.source).split("/")[0].toUpperCase();
+  const localId = clean(properties.hash || properties.id);
+  return {
+    id: [entry.source, entry.layer, entry.name, localId].filter(Boolean).join("/"),
+    houseNumber: properties.number,
+    street: properties.street,
+    unit: properties.unit,
+    city: properties.city,
+    district: properties.district,
+    state: properties.region,
+    postcode: properties.postcode,
+    country,
+    lon: coordinates[0],
+    lat: coordinates[1],
+    url: openAddressesSourceUrl(entry),
+    kind: "address"
+  };
+}
+
+async function *readOpenAddressesJob(source, entry, options) {
+  const token = clean(process.env[source.tokenEnv]);
+  const url = new URL(`${source.apiUrl}/job/${entry.job}/output/source.geojson.gz`);
+  url.searchParams.set("token", token);
+  const controller = new AbortController();
+  const idleMs = Math.max(10_000, Number(source.downloadIdleTimeoutMs || 120_000));
+  let idleTimer;
+  const armIdleTimeout = () => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => controller.abort(new Error(`OpenAddresses job ${entry.job} stalled for ${idleMs} ms`)), idleMs);
+  };
+  armIdleTimeout();
+  let response;
+  try {
+    response = await options.fetchSource(url, { signal: controller.signal }, { timeoutMs: options.timeoutMs });
+  } catch (error) {
+    clearTimeout(idleTimer);
+    throw new Error(`${source.id}: OpenAddresses job ${entry.job} request failed: ${redactSecret(error.message, token)}`);
+  }
+  if (!response.ok) {
+    await response.body?.cancel();
+    clearTimeout(idleTimer);
+    throw new Error(`${source.id}: OpenAddresses job ${entry.job} download returned ${response.status}`);
+  }
+  const compressed = Readable.fromWeb(response.body);
+  const gunzip = createGunzip();
+  compressed.pipe(gunzip);
+  const lines = createInterface({ input: gunzip, crlfDelay: Infinity });
+  let row = 0;
+  try {
+    for await (const line of lines) {
+      armIdleTimeout();
+      row++;
+      if (!line.trim()) continue;
+      let feature;
+      try {
+        feature = JSON.parse(line);
+      } catch (error) {
+        throw new Error(`${source.id}: invalid GeoJSON in OpenAddresses job ${entry.job} row ${row}: ${error.message}`, { cause: error });
+      }
+      const record = openAddressesRecord(feature, entry);
+      if (record) yield record;
+    }
+  } finally {
+    clearTimeout(idleTimer);
+    lines.close();
+    if (!compressed.destroyed) compressed.destroy();
+    if (!gunzip.destroyed) gunzip.destroy();
+  }
+}
+
+async function prepareOpenAddressesSource(source, options) {
+  const root = resolve(options.root);
+  const dir = join(root, source.id);
+  const metaPath = join(dir, "source.meta.json");
+  mkdirSync(dir, { recursive: true });
+  const prior = readJson(metaPath, null);
+  const refreshMs = Math.max(0, Number(source.refreshIntervalHours ?? 168)) * 3600_000;
+  let entries = Array.isArray(prior?.entries) ? prior.entries : null;
+  const cacheFresh = entries && refreshMs > 0
+    && Date.now() - Date.parse(prior.checkedAt || prior.downloadedAt || 0) < refreshMs;
+  if (!cacheFresh) {
+    const response = await options.fetchSource(`${source.apiUrl}/data?layer=addresses`, {}, { timeoutMs: options.timeoutMs });
+    if (!response.ok) throw new Error(`${source.id}: OpenAddresses data catalog returned ${response.status}`);
+    const catalog = await response.json();
+    if (!Array.isArray(catalog)) throw new Error(`${source.id}: OpenAddresses data catalog is not an array.`);
+    entries = catalog
+      .filter(entry => entry?.output?.output && entry.job && entry.source && entry.layer === "addresses")
+      .sort((left, right) => (
+        clean(left.source).localeCompare(clean(right.source))
+        || clean(left.name).localeCompare(clean(right.name))
+        || Number(left.job) - Number(right.job)
+      ));
+    if (!entries.length) throw new Error(`${source.id}: OpenAddresses returned no address jobs.`);
+  }
+  const identity = metadataIdentity(entries, source);
+  if (!cacheFresh) {
+    writeFileSync(metaPath, JSON.stringify({
+      id: source.id,
+      provider: source.provider,
+      apiUrl: source.apiUrl,
+      identity,
+      checkedAt: new Date().toISOString(),
+      entries
+    }, null, 2));
+  }
+  const token = clean(process.env[source.tokenEnv]);
+  if (!token) {
+    throw new Error(`${source.id}: ${source.tokenEnv} is required. Create a free OpenAddresses API token at https://batch.openaddresses.io/ and store it in the indexer environment.`);
+  }
+  // Validate authentication without downloading an address payload. Manual
+  // redirect mode returns the authenticated CDN hand-off as a small 3xx.
+  const probe = new URL(`${source.apiUrl}/job/${entries[0].job}/output/source.geojson.gz`);
+  probe.searchParams.set("token", token);
+  let auth;
+  try {
+    auth = await options.fetchSource(probe, { redirect: "manual" }, { timeoutMs: options.timeoutMs });
+  } catch (error) {
+    throw new Error(`${source.id}: OpenAddresses authentication check failed: ${redactSecret(error.message, token)}`);
+  }
+  await auth.body?.cancel();
+  if (auth.status < 300 || auth.status >= 400) {
+    throw new Error(`${source.id}: ${source.tokenEnv} was rejected by OpenAddresses (${auth.status}).`);
+  }
+  options.log?.(`${source.id}: current OpenAddresses snapshot has ${entries.length.toLocaleString()} address jobs`);
+  return {
+    ...source,
+    path: metaPath,
+    identity,
+    async *batches(completed = new Set()) {
+      for (const entry of entries) {
+        const id = openAddressesJobKey(entry);
+        if (completed.has(id)) continue;
+        yield {
+          id,
+          label: `${entry.source}/${entry.layer}/${entry.name} (job ${entry.job})`,
+          records: () => readOpenAddressesJob(source, entry, options)
+        };
+      }
+    }
+  };
+}
+
 function remoteIdentity(response, source) {
   return {
     etag: clean(response.headers.get("etag")),
@@ -168,6 +378,9 @@ async function download(response, path) {
 }
 
 export async function prepareAddressSource(source, options) {
+  if (source.provider === "openaddresses-batch") {
+    return prepareOpenAddressesSource(source, options);
+  }
   const root = resolve(options.root);
   const dir = join(root, source.id);
   const path = join(dir, `source${extensionFor(source)}`);
@@ -219,7 +432,7 @@ export function regionAddressSourceIdentity(preparedSources) {
     .digest("hex");
 }
 
-const SPATIAL_PARTITION_SCHEMA_VERSION = 1;
+const SPATIAL_PARTITION_SCHEMA_VERSION = 2;
 const GRID_DEGREES = 5;
 const PARTITION_BUFFER_BYTES = 1024 * 1024;
 
@@ -303,6 +516,136 @@ function createBufferedJsonlWriter(path) {
   };
 }
 
+function createGzipJsonlWriter(path, level = 3) {
+  const output = createWriteStream(path, { flags: "a" });
+  const gzip = createGzip({ level });
+  gzip.pipe(output);
+  let closed = false;
+  return {
+    write(record) {
+      return gzip.write(`${JSON.stringify(record)}\n`) ? null : once(gzip, "drain");
+    },
+    async close() {
+      if (closed) return;
+      closed = true;
+      gzip.end();
+      await Promise.all([finished(gzip), finished(output)]);
+    }
+  };
+}
+
+function partitionFile(root, regionId, compression = "none") {
+  return join(root, `${regionId}.jsonl${compression === "gzip" ? ".gz" : ""}`);
+}
+
+function writeJsonAtomic(path, value) {
+  const partial = `${path}.tmp`;
+  writeFileSync(partial, JSON.stringify(value, null, 2));
+  renameSync(partial, path);
+}
+
+async function partitionAddressSourceBatches(source, options, context) {
+  const { regions, root, partial, router, routingIdentity } = context;
+  const progressPath = join(partial, "partitions.progress.json");
+  let progress = readJson(progressPath, null);
+  if (progress?.identity !== routingIdentity) {
+    rmSync(partial, { recursive: true, force: true });
+    progress = null;
+  }
+  mkdirSync(partial, { recursive: true });
+  const counts = progress?.regions || Object.fromEntries(regions.map(region => [region.id, 0]));
+  const stats = progress?.stats || { rowsRead: 0, normalized: 0, unmatched: 0, writes: 0 };
+  const completed = new Set(progress?.completed || []);
+  if (completed.size) {
+    options.log?.(`${source.id}: resuming after ${completed.size.toLocaleString()} completed OpenAddresses jobs`);
+  }
+
+  for await (const batch of source.batches(completed)) {
+    const countsBefore = { ...counts };
+    const statsBefore = { ...stats };
+    const attempts = Math.max(1, Number(source.downloadAttempts || 3));
+    let completedBatch = false;
+    for (let attempt = 1; attempt <= attempts && !completedBatch; attempt++) {
+      const writers = new Map();
+      const offsets = new Map();
+      try {
+        const records = typeof batch.records === "function" ? batch.records() : batch.records;
+        for await (const raw of records) {
+          stats.rowsRead++;
+          const mapped = typeof source.normalize === "function" ? source.normalize(raw) : raw;
+          const record = options.normalizeRecord(mapped, source.defaults);
+          if (!record || (typeof source.filter === "function" && !source.filter(record, raw))) continue;
+          stats.normalized++;
+          const matches = router.route(record.lat, record.lon);
+          if (!matches.length) {
+            stats.unmatched++;
+            continue;
+          }
+          for (const region of matches) {
+            if (!writers.has(region.id)) {
+              const path = partitionFile(partial, region.id, "gzip");
+              offsets.set(region.id, existsSync(path) ? statSync(path).size : 0);
+              const level = Math.max(1, Math.min(9, Number(source.partitionCompressionLevel || 3)));
+              writers.set(region.id, createGzipJsonlWriter(path, level));
+            }
+            const backpressure = writers.get(region.id).write(record);
+            if (backpressure) await backpressure;
+            counts[region.id] = Number(counts[region.id] || 0) + 1;
+            stats.writes++;
+          }
+          if (stats.rowsRead % 250_000 === 0) {
+            options.log?.(`${source.id}: partitioned ${stats.rowsRead.toLocaleString()} rows into ${stats.writes.toLocaleString()} compressed shard records`);
+          }
+        }
+        await Promise.all([...writers.values()].map(writer => writer.close()));
+        completedBatch = true;
+      } catch (error) {
+        await Promise.allSettled([...writers.values()].map(writer => writer.close()));
+        for (const [regionId, offset] of offsets) {
+          const path = partitionFile(partial, regionId, "gzip");
+          if (offset) truncateSync(path, offset);
+          else rmSync(path, { force: true });
+        }
+        Object.assign(counts, countsBefore);
+        Object.assign(stats, statsBefore);
+        if (attempt < attempts && typeof batch.records === "function") {
+          options.log?.(`${source.id}: retrying ${batch.label || batch.id} after attempt ${attempt}/${attempts}: ${error.message}`);
+          continue;
+        }
+        throw new Error(`${source.id}: failed while partitioning ${batch.label || batch.id}: ${error.message}`, { cause: error });
+      }
+    }
+    completed.add(batch.id);
+    writeJsonAtomic(progressPath, {
+      schemaVersion: SPATIAL_PARTITION_SCHEMA_VERSION,
+      identity: routingIdentity,
+      source: source.identity,
+      compression: "gzip",
+      completed: [...completed],
+      regions: counts,
+      stats,
+      updatedAt: new Date().toISOString()
+    });
+    options.log?.(`${source.id}: checkpointed ${batch.label || batch.id} (${completed.size.toLocaleString()} jobs complete)`);
+  }
+
+  const meta = {
+    schemaVersion: SPATIAL_PARTITION_SCHEMA_VERSION,
+    identity: routingIdentity,
+    source: source.identity,
+    compression: "gzip",
+    batches: completed.size,
+    regions: counts,
+    ...stats,
+    builtAt: new Date().toISOString()
+  };
+  writeJsonAtomic(join(partial, "partitions.meta.json"), meta);
+  rmSync(progressPath, { force: true });
+  rmSync(root, { recursive: true, force: true });
+  renameSync(partial, root);
+  return { ...meta, root };
+}
+
 /**
  * Stream a global provider once and materialize canonical per-shard JSONL
  * partitions. Overlapping shard coverage intentionally receives a copy in
@@ -319,14 +662,17 @@ export async function partitionAddressSourceSpatially(source, options) {
   })).digest("hex");
   const prior = readJson(metaPath, null);
   if (prior?.identity === routingIdentity && prior?.regions
-      && Object.entries(prior.regions).every(([id, count]) => !count || existsSync(join(root, `${id}.jsonl`)))) {
+      && Object.entries(prior.regions).every(([id, count]) => !count || existsSync(partitionFile(root, id, prior.compression)))) {
     return { ...prior, root };
   }
 
   const partial = `${root}.partial`;
+  const router = createRegionSpatialRouter(regions);
+  if (typeof source.batches === "function") {
+    return partitionAddressSourceBatches(source, options, { regions, root, partial, router, routingIdentity });
+  }
   rmSync(partial, { recursive: true, force: true });
   mkdirSync(partial, { recursive: true });
-  const router = createRegionSpatialRouter(regions);
   const writers = new Map();
   const counts = Object.fromEntries(regions.map(region => [region.id, 0]));
   const stats = { rowsRead: 0, normalized: 0, unmatched: 0, writes: 0 };
@@ -381,8 +727,8 @@ export function spatialPartitionForRegion(source, partition, region) {
   return {
     ...source,
     format: "jsonl",
-    path: join(partition.root, `${region.id}.jsonl`),
-    compression: "none",
+    path: partitionFile(partition.root, region.id, partition.compression),
+    compression: partition.compression || "none",
     archiveEntry: undefined,
     partition: undefined,
     identity: {
