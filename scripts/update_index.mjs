@@ -119,6 +119,10 @@ const SOURCE_REQUEST_TIMEOUT_MS = Math.max(
   1_000,
   Number(process.env.SOURCE_REQUEST_TIMEOUT_MS || 30_000)
 );
+const PBF_DOWNLOAD_TIMEOUT_MS = Math.max(
+  SOURCE_REQUEST_TIMEOUT_MS,
+  Number(process.env.PBF_DOWNLOAD_TIMEOUT_MS || 30 * 60_000)
+);
 // Keep this synchronized with Rangefind's PBF extraction schema so a package
 // upgrade cannot reuse a corpus produced by an older extractor before
 // extractOsmPlaces sees it. Schema 11 adds normalized alternate names and
@@ -612,7 +616,7 @@ async function refreshPbf(region, state) {
   const response = await fetchSource(
     url,
     {},
-    { timeoutMs: SOURCE_REQUEST_TIMEOUT_MS }
+    { timeoutMs: PBF_DOWNLOAD_TIMEOUT_MS }
   );
   if (!response.ok) throw new Error(`${region.id}: GET ${url} → ${response.status}`);
   const file = createWriteStream(tmp);
@@ -1650,6 +1654,7 @@ async function main() {
     let acquisitionCompleted = 0;
     let acquisitionHalted = false;
     let acquisitionHaltReason = null;
+    const acquisitionFailures = [];
     let reservedExtractionBytes = 0;
     const reportAcquisition = region => updateProgress(
       "acquiring",
@@ -1718,6 +1723,7 @@ async function main() {
             acquisitionHaltReason ||= error;
             log(`Acquisition paused for disk safety — ${error.message}`);
           } else {
+            acquisitionFailures.push({ region: region.id, error });
             log(`${region.id}: refresh/extract failed — ${error.message} (continuing)`);
           }
         } finally {
@@ -1730,6 +1736,13 @@ async function main() {
     await Promise.all(Array.from({ length: acquisitionConcurrency }, () => acquireRegions()));
     reportAcquisition(null);
     if (acquisitionHaltReason) throw acquisitionHaltReason;
+    if (args.forceStats && acquisitionFailures.length) {
+      const first = acquisitionFailures[0];
+      throw new Error(
+        `Forced acquisition incomplete: ${acquisitionFailures.length} region(s) failed; `
+        + `first was ${first.region}: ${first.error.message}`
+      );
+    }
   }
 
   // 3: frozen stats (regenerating cascades a full rebuild via fingerprints).
