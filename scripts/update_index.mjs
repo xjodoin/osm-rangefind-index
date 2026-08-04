@@ -1631,6 +1631,7 @@ async function main() {
     let acquisitionCursor = 0;
     let acquisitionCompleted = 0;
     let acquisitionHalted = false;
+    let acquisitionHaltReason = null;
     let reservedExtractionBytes = 0;
     const reportAcquisition = region => updateProgress(
       "acquiring",
@@ -1692,6 +1693,7 @@ async function main() {
           cleanupFailedAcquisition(region);
           if (error instanceof DiskHeadroomError) {
             acquisitionHalted = true;
+            acquisitionHaltReason ||= error;
             log(`Acquisition paused for disk safety — ${error.message}`);
           } else {
             log(`${region.id}: refresh/extract failed — ${error.message} (continuing)`);
@@ -1705,6 +1707,7 @@ async function main() {
     log(`Acquisition concurrency: ${acquisitionConcurrency} lane(s); PBFs >= ${(options.largePbfBytes / 1024 / 1024 / 1024).toFixed(1)} GiB run exclusively.`);
     await Promise.all(Array.from({ length: acquisitionConcurrency }, () => acquireRegions()));
     reportAcquisition(null);
+    if (acquisitionHaltReason) throw acquisitionHaltReason;
   }
 
   // 3: frozen stats (regenerating cascades a full rebuild via fingerprints).
