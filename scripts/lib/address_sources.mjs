@@ -291,8 +291,12 @@ async function prepareOpenAddressesSource(source, options) {
   const prior = readJson(metaPath, null);
   const refreshMs = Math.max(0, Number(source.refreshIntervalHours ?? 168)) * 3600_000;
   let entries = Array.isArray(prior?.entries) ? prior.entries : null;
-  const cacheFresh = entries && refreshMs > 0
-    && Date.now() - Date.parse(prior.checkedAt || prior.downloadedAt || 0) < refreshMs;
+  // A resumed planet build must keep using the source snapshot with which it
+  // started. Otherwise an upstream catalog update during a multi-hour run
+  // invalidates hundreds of already-enriched regions after a process restart.
+  const cacheFresh = Boolean(entries) && (options.reuseCached === true
+    || (refreshMs > 0
+      && Date.now() - Date.parse(prior.checkedAt || prior.downloadedAt || 0) < refreshMs));
   if (!cacheFresh) {
     const response = await options.fetchSource(`${source.apiUrl}/data?layer=addresses`, {}, { timeoutMs: options.timeoutMs });
     if (!response.ok) throw new Error(`${source.id}: OpenAddresses data catalog returned ${response.status}`);
@@ -407,12 +411,17 @@ export async function prepareAddressSource(source, options) {
   const path = join(dir, `source${extensionFor(source)}`);
   const metaPath = join(dir, "source.meta.json");
   mkdirSync(dir, { recursive: true });
+  const prior = readJson(metaPath, null);
+  if (options.reuseCached === true
+      && existsSync(path)
+      && prior?.identity?.config === configFingerprint(source)) {
+    return { ...source, path, identity: prior.identity };
+  }
   const head = await options.fetchSource(
     source.url,
     { method: "HEAD" },
     { timeoutMs: options.timeoutMs }
   );
-  const prior = readJson(metaPath, null);
   let identity = head.ok ? remoteIdentity(head, source) : null;
   if (identity && existsSync(path) && sameRemoteIdentity(prior?.identity, identity)) {
     return { ...source, path, identity };

@@ -54,6 +54,7 @@ import { createRequire } from "node:module";
 import { basename, dirname, join, resolve } from "node:path";
 import { availableParallelism, hostname } from "node:os";
 import { pipeline } from "node:stream/promises";
+import { setTimeout as delay } from "node:timers/promises";
 import { createGunzip, createGzip } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import { collectScoringStats, loadScoringStats } from "rangefind/scoring-stats";
@@ -74,6 +75,12 @@ import {
 } from "./lib/root_publish.mjs";
 import { createTaskQueue } from "./lib/serial_task_queue.mjs";
 import { fetchSource } from "./lib/source_fetch.mjs";
+import {
+  acquisitionSessionSignature,
+  openAcquisitionSession,
+  recordAcquisitionFailure,
+  recordAcquisitionSuccess
+} from "./lib/acquisition_resume.mjs";
 import {
   buildContentFingerprint,
   buildShardFingerprint,
@@ -122,6 +129,14 @@ const SOURCE_REQUEST_TIMEOUT_MS = Math.max(
 const PBF_DOWNLOAD_TIMEOUT_MS = Math.max(
   SOURCE_REQUEST_TIMEOUT_MS,
   Number(process.env.PBF_DOWNLOAD_TIMEOUT_MS || 30 * 60_000)
+);
+const ACQUISITION_MAX_ATTEMPTS = Math.max(
+  1,
+  Math.min(10, Number(process.env.ACQUISITION_MAX_ATTEMPTS || 4))
+);
+const ACQUISITION_RETRY_BASE_MS = Math.max(
+  1_000,
+  Number(process.env.ACQUISITION_RETRY_BASE_MS || 10_000)
 );
 // Keep this synchronized with Rangefind's PBF extraction schema so a package
 // upgrade cannot reuse a corpus produced by an older extractor before
@@ -531,7 +546,7 @@ function pbfIdentity(region, state) {
 const addressSourcePreparations = new Map();
 const addressSourcePartitions = new Map();
 
-async function prepareRegionAddressSources(region, regions) {
+async function prepareRegionAddressSources(region, regions, { reuseCached = false } = {}) {
   if (!region.addressSources?.length) {
     region.preparedAddressSources = [];
     region.enrichmentIdentity = "";
@@ -543,6 +558,7 @@ async function prepareRegionAddressSources(region, regions) {
         root: join(WORK, "address-sources"),
         fetchSource,
         timeoutMs: SOURCE_REQUEST_TIMEOUT_MS,
+        reuseCached,
         log
       }).catch(error => {
         addressSourcePreparations.delete(source.id);
@@ -1569,6 +1585,30 @@ async function main() {
 
   const store = args.upload ? createR2Store() : null;
   acquireLock();
+  let acquisitionSession = state.acquisitionSession || null;
+  let resumedAcquisition = false;
+  if (!args.finalizeOnly) {
+    const signature = acquisitionSessionSignature({
+      extractionSchema: OSM_EXTRACTION_SCHEMA_VERSION,
+      rangefindBuilder: RANGEFIND_BUILDER_VERSION,
+      regions: regions.map(region => ({
+        id: region.id,
+        geofabrik: region.geofabrik,
+        pinned: region.pinned,
+        bbox: region.bbox,
+        addressSources: region.addressSources
+      })),
+      addressSources: ADDRESS_SOURCES.sources
+    });
+    const opened = openAcquisitionSession(
+      state.acquisitionSession,
+      signature,
+      regions.map(region => region.id)
+    );
+    acquisitionSession = opened.session;
+    resumedAcquisition = opened.resumed;
+    state.acquisitionSession = acquisitionSession;
+  }
   const stopAt = deadlineMs(args);
   const remaining = () => stopAt - Date.now();
   const outOfTime = (needMs = 5 * 60_000) => remaining() < needMs;
@@ -1580,9 +1620,13 @@ async function main() {
     deadline: stopAt === Infinity ? null : new Date(stopAt).toISOString(),
     selectedRegions: args.regions,
     progress: null,
-    error: null
+    error: null,
+    resumedAcquisition
   };
   saveState(state);
+  if (resumedAcquisition) {
+    log(`Resuming acquisition cycle: ${acquisitionSession.completedRegionIds.length}/${regions.length} region(s) already complete; cached address-source snapshot frozen.`);
+  }
   publishStatusArtifacts(allRegions, state, store, args.upload, true);
   const updateProgress = (stage, region = null, completed = 0, total = regions.length, extra = {}) => {
     state.run.progress = {
@@ -1624,6 +1668,7 @@ async function main() {
     log(`Direct R2 uploads: ${uploadQueue.concurrency} shard lane(s), up to ${uploadQueue.capacity} shard(s) pending, ${process.env.R2_REQUEST_CONCURRENCY || 16} total S3 requests.`);
   }
   let runError = null;
+  let pipelineComplete = false;
 
   try {
 
@@ -1650,97 +1695,129 @@ async function main() {
     const acquisitionConcurrency = Math.min(options.acquisitionConcurrency, regions.length);
     const withExtractionCapacity = createWeightedLimiter(acquisitionConcurrency);
     const activeRegions = new Set();
-    let acquisitionCursor = 0;
-    let acquisitionCompleted = 0;
     let acquisitionHalted = false;
     let acquisitionHaltReason = null;
-    const acquisitionFailures = [];
     let reservedExtractionBytes = 0;
+    const completedRegionIds = new Set(acquisitionSession.completedRegionIds.filter(id => {
+      const region = regions.find(candidate => candidate.id === id);
+      return region && hasCorpus(region);
+    }));
+    if (completedRegionIds.size !== acquisitionSession.completedRegionIds.length) {
+      log(`Resume validation: ${acquisitionSession.completedRegionIds.length - completedRegionIds.size} completed region(s) lost their local corpus and will be reacquired.`);
+      acquisitionSession.completedRegionIds = [...completedRegionIds];
+      saveState(state);
+    }
     const reportAcquisition = region => updateProgress(
       "acquiring",
       region,
-      acquisitionCompleted,
+      completedRegionIds.size,
       regions.length,
-      { regions: [...activeRegions] }
+      {
+        regions: [...activeRegions],
+        failed: Object.keys(acquisitionSession.failures).length
+      }
     );
-    const acquireRegions = async () => {
-      while (!outOfTime() && !acquisitionHalted) {
-        const regionIndex = acquisitionCursor++;
-        if (regionIndex >= regions.length) return;
-        const region = regions[regionIndex];
-        activeRegions.add(region.id);
-        reportAcquisition(region);
-        try {
-          ensureDiskHeadroom(region, options);
-          // Global spatial partitions are keyed by the complete production
-          // region topology even during a --regions repair run. Using the
-          // selected subset here would invalidate and rebuild the planet
-          // partition for a one-shard operation.
-          await prepareRegionAddressSources(region, allRegions);
-          const recovered = recoverCompletedEnrichedCorpus(region, state);
-          const source = await refreshPbf(region, state);
-          const large = source.bytes >= options.largePbfBytes;
-          if (large) {
-            log(`${region.id}: large PBF (${(source.bytes / 1024 / 1024 / 1024).toFixed(1)} GiB) — extracting exclusively`);
-          }
-          const extracted = await withExtractionCapacity(
-            large ? acquisitionConcurrency : 1,
-            async () => {
-              ensureDiskHeadroom(region, options, source.bytes, reservedExtractionBytes);
-              const reservation = diskWorkingBytes(region, source.bytes);
-              reservedExtractionBytes += reservation;
-              try {
-                return await extractJsonl(region, state);
-              } finally {
-                reservedExtractionBytes -= reservation;
+    log(`Acquisition concurrency: ${acquisitionConcurrency} lane(s); PBFs >= ${(options.largePbfBytes / 1024 / 1024 / 1024).toFixed(1)} GiB run exclusively.`);
+    let pending = regions.filter(region => !completedRegionIds.has(region.id));
+    let finalFailures = [];
+    for (let attempt = 1; pending.length && attempt <= ACQUISITION_MAX_ATTEMPTS; attempt++) {
+      if (outOfTime() || acquisitionHalted) break;
+      if (attempt > 1) {
+        const waitMs = Math.min(5 * 60_000, ACQUISITION_RETRY_BASE_MS * (3 ** (attempt - 2)));
+        log(`Retrying ${pending.length} failed acquisition region(s), attempt ${attempt}/${ACQUISITION_MAX_ATTEMPTS}, in ${(waitMs / 1000).toFixed(0)}s: ${pending.map(region => region.id).join(", ")}`);
+        await delay(waitMs);
+      }
+      let acquisitionCursor = 0;
+      const failures = [];
+      const acquireRegions = async () => {
+        while (!outOfTime() && !acquisitionHalted) {
+          const regionIndex = acquisitionCursor++;
+          if (regionIndex >= pending.length) return;
+          const region = pending[regionIndex];
+          activeRegions.add(region.id);
+          reportAcquisition(region);
+          try {
+            ensureDiskHeadroom(region, options);
+            // Global spatial partitions are keyed by the complete production
+            // region topology even during a --regions repair run. Using the
+            // selected subset here would invalidate and rebuild the planet
+            // partition for a one-shard operation.
+            await prepareRegionAddressSources(region, allRegions, { reuseCached: resumedAcquisition });
+            const recovered = recoverCompletedEnrichedCorpus(region, state);
+            const source = await refreshPbf(region, state);
+            const large = source.bytes >= options.largePbfBytes;
+            if (large) {
+              log(`${region.id}: large PBF (${(source.bytes / 1024 / 1024 / 1024).toFixed(1)} GiB) — extracting exclusively`);
+            }
+            const extracted = await withExtractionCapacity(
+              large ? acquisitionConcurrency : 1,
+              async () => {
+                ensureDiskHeadroom(region, options, source.bytes, reservedExtractionBytes);
+                const reservation = diskWorkingBytes(region, source.bytes);
+                reservedExtractionBytes += reservation;
+                try {
+                  return await extractJsonl(region, state);
+                } finally {
+                  reservedExtractionBytes -= reservation;
+                }
+              }
+            );
+            if (extracted || recovered) {
+              log(`${region.id}: corpus refreshed (${(state.regions[region.id].docs || 0).toLocaleString()} docs)`);
+              const builtBuilderVersion = previouslyBuiltBuilderVersion(state.regions[region.id]);
+              if (!state.regions[region.id].builtFingerprint
+                  || args.forceStats
+                  || builtBuilderVersion !== RANGEFIND_BUILDER_VERSION) {
+                // Bring-up acquisition: no shard exists yet, so the corpus is
+                // not a diff base — compress it now and drop the PBF, keeping
+                // the acquisition footprint near the gzipped corpus total
+                // instead of hundreds of GB of PBFs + plain JSONL.
+                await compressJsonl(region);
               }
             }
-          );
-          if (extracted || recovered) {
-            log(`${region.id}: corpus refreshed (${(state.regions[region.id].docs || 0).toLocaleString()} docs)`);
-            const builtBuilderVersion = previouslyBuiltBuilderVersion(state.regions[region.id]);
-            if (!state.regions[region.id].builtFingerprint
-                || args.forceStats
-                || builtBuilderVersion !== RANGEFIND_BUILDER_VERSION) {
-              // Bring-up acquisition: no shard exists yet, so the corpus is
-              // not a diff base — compress it now and drop the PBF, keeping
-              // the acquisition footprint near the gzipped corpus total
-              // instead of hundreds of GB of PBFs + plain JSONL.
-              await compressJsonl(region);
+            // The completed corpus is the only downstream build input. Keeping
+            // all ~79 GiB of downloaded PBFs until 310 shards publish can exhaust
+            // the planet-build disk while fresh JSONL and old gz snapshots
+            // coexist, so reclaim each non-pinned source immediately.
+            if (!region.pinned) rmSync(region.pbf, { force: true });
+            cleanupExtractionScratch(region);
+            completedRegionIds.add(region.id);
+            recordAcquisitionSuccess(acquisitionSession, region.id);
+            saveState(state);
+          } catch (error) {
+            cleanupFailedAcquisition(region);
+            if (error instanceof DiskHeadroomError) {
+              acquisitionHalted = true;
+              acquisitionHaltReason ||= error;
+              log(`Acquisition paused for disk safety — ${error.message}`);
+            } else {
+              failures.push({ region, error });
+              recordAcquisitionFailure(acquisitionSession, region.id, error, attempt);
+              saveState(state);
+              log(`${region.id}: refresh/extract failed — ${error.message} (attempt ${attempt}/${ACQUISITION_MAX_ATTEMPTS})`);
             }
+          } finally {
+            activeRegions.delete(region.id);
+            reportAcquisition(region);
           }
-          // The completed corpus is the only downstream build input. Keeping
-          // all ~79 GiB of downloaded PBFs until 310 shards publish can exhaust
-          // the planet-build disk while fresh JSONL and old gz snapshots
-          // coexist, so reclaim each non-pinned source immediately.
-          if (!region.pinned) rmSync(region.pbf, { force: true });
-          cleanupExtractionScratch(region);
-          saveState(state);
-        } catch (error) {
-          cleanupFailedAcquisition(region);
-          if (error instanceof DiskHeadroomError) {
-            acquisitionHalted = true;
-            acquisitionHaltReason ||= error;
-            log(`Acquisition paused for disk safety — ${error.message}`);
-          } else {
-            acquisitionFailures.push({ region: region.id, error });
-            log(`${region.id}: refresh/extract failed — ${error.message} (continuing)`);
-          }
-        } finally {
-          activeRegions.delete(region.id);
-          acquisitionCompleted++;
         }
-      }
-    };
-    log(`Acquisition concurrency: ${acquisitionConcurrency} lane(s); PBFs >= ${(options.largePbfBytes / 1024 / 1024 / 1024).toFixed(1)} GiB run exclusively.`);
-    await Promise.all(Array.from({ length: acquisitionConcurrency }, () => acquireRegions()));
+      };
+      await Promise.all(Array.from({ length: acquisitionConcurrency }, () => acquireRegions()));
+      finalFailures = failures;
+      pending = failures.map(failure => failure.region);
+    }
     reportAcquisition(null);
     if (acquisitionHaltReason) throw acquisitionHaltReason;
-    if (args.forceStats && acquisitionFailures.length) {
-      const first = acquisitionFailures[0];
+    if (completedRegionIds.size === regions.length) {
+      acquisitionSession.completedAt = new Date().toISOString();
+      acquisitionSession.failures = {};
+      saveState(state);
+    }
+    if (args.forceStats && finalFailures.length && !outOfTime()) {
+      const first = finalFailures[0];
       throw new Error(
-        `Forced acquisition incomplete: ${acquisitionFailures.length} region(s) failed; `
-        + `first was ${first.region}: ${first.error.message}`
+        `Forced acquisition incomplete after ${ACQUISITION_MAX_ATTEMPTS} attempt(s): ${finalFailures.length} region(s) failed; `
+        + `first was ${first.region.id}: ${first.error.message}`
       );
     }
   }
@@ -1772,7 +1849,13 @@ async function main() {
     }
     log("Region-scoped build: reusing frozen planet scoring stats.");
   } else {
-    await ensureScoringStats(ready, options, state, args.forceStats, !args.regions || args.partial);
+    const forceStatsNow = args.forceStats && !acquisitionSession?.forcedStatsCompleted;
+    await ensureScoringStats(ready, options, state, forceStatsNow, !args.regions || args.partial);
+    if (forceStatsNow) {
+      acquisitionSession.forcedStatsCompleted = true;
+      acquisitionSession.forcedStatsCompletedAt = new Date().toISOString();
+      saveState(state);
+    }
   }
 
   // Existing cleaned shards need one remote term-set backfill for federated
@@ -1975,7 +2058,7 @@ async function main() {
       // remote extras from a partial local copy would delete live packs.
       await uploadAndCleanupShard(region, state, store, args);
     }
-    const allUploaded = built.every(region => {
+    const allUploaded = built.length === rootCandidates.length && built.every(region => {
       const entry = state.regions[region.id];
       return Boolean(entry.builtFingerprint) && entry.uploadedFingerprint === entry.builtFingerprint;
     });
@@ -1990,9 +2073,18 @@ async function main() {
       };
       saveState(state);
       log("Publish complete.");
+      pipelineComplete = true;
     } else {
       log("Some shards not uploaded yet; root manifest NOT updated remotely (stays consistent).");
     }
+  } else {
+    pipelineComplete = ready.every(region => {
+      try {
+        return shardFingerprint(region, state) === state.regions[region.id]?.builtFingerprint;
+      } catch {
+        return false;
+      }
+    });
   }
   log("Run finished.");
   } catch (error) {
@@ -2008,6 +2100,7 @@ async function main() {
       error: runError ? String(runError.message || runError).slice(0, 500) : null
     };
     if (!runError) state.lastSuccessfulRunAt = completedAt;
+    if (!runError && pipelineComplete) delete state.acquisitionSession;
     saveState(state);
     publishStatusArtifacts(allRegions, state, store, args.upload);
     if (args.upload) await flushStatusUploads(store);

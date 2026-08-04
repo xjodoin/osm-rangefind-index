@@ -119,6 +119,43 @@ test("countrywide address sources download once and reuse a content/config ident
   }
 });
 
+test("resumed runs freeze a downloaded address source without contacting upstream", async () => {
+  const root = await mkdtemp(join(tmpdir(), "rangefind-address-frozen-"));
+  try {
+    let calls = 0;
+    const source = sourceConfig();
+    const first = await prepareAddressSource(source, {
+      root,
+      timeoutMs: 1000,
+      fetchSource: async (_url, init = {}) => {
+        calls++;
+        const headers = {
+          etag: '"postal-v1"',
+          "last-modified": "Sat, 01 Aug 2026 00:00:00 GMT",
+          "content-length": "12"
+        };
+        return init.method === "HEAD"
+          ? new Response(null, { status: 200, headers })
+          : new Response("postal-data", { status: 200, headers });
+      }
+    });
+    const resumed = await prepareAddressSource(source, {
+      root,
+      timeoutMs: 1000,
+      reuseCached: true,
+      fetchSource: async () => {
+        throw new Error("upstream must not be contacted while resuming");
+      }
+    });
+
+    assert.equal(calls, 2);
+    assert.deepEqual(resumed.identity, first.identity);
+    assert.equal(await readFile(resumed.path, "utf8"), "postal-data");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 test("address source downloads fall back when a provider rejects HEAD", async () => {
   const root = await mkdtemp(join(tmpdir(), "rangefind-address-headless-"));
   try {
