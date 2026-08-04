@@ -311,10 +311,19 @@ function regionOsmJsonl(region) {
   return join(regionWorkRoot(region), "data/osm-places.jsonl");
 }
 
+function regionEnrichedJsonl(region) {
+  return join(regionWorkRoot(region), "data/osm-enriched-places.jsonl");
+}
+
 function regionJsonl(region) {
-  return region.addressSources?.length
-    ? join(regionWorkRoot(region), "data/osm-enriched-places.jsonl")
-    : regionOsmJsonl(region);
+  if (Array.isArray(region.preparedAddressSources)) {
+    return region.preparedAddressSources.length ? regionEnrichedJsonl(region) : regionOsmJsonl(region);
+  }
+  const enriched = regionEnrichedJsonl(region);
+  if (existsSync(enriched) || existsSync(`${enriched}.gz`) || existsSync(`${enriched}.meta.json`)) return enriched;
+  const raw = regionOsmJsonl(region);
+  if (existsSync(raw) || existsSync(`${raw}.gz`)) return raw;
+  return region.addressSources?.length ? enriched : raw;
 }
 
 function regionJsonlGz(region) {
@@ -463,7 +472,8 @@ function recoverCompletedEnrichedCorpus(region, state) {
   const entry = state.regions[region.id] || (state.regions[region.id] = {});
   const identity = pbfIdentity(region, state);
   const enrichmentIdentity = region.enrichmentIdentity || "";
-  const meta = loadJson(`${regionJsonl(region)}.meta.json`, null);
+  const enriched = regionEnrichedJsonl(region);
+  const meta = loadJson(`${enriched}.meta.json`, null);
   const osmMeta = loadJson(`${regionOsmJsonl(region)}.meta.json`, null);
   const pbf = existsSync(region.pbf) ? statSync(region.pbf) : null;
   const currentPbf = pbf
@@ -471,14 +481,20 @@ function recoverCompletedEnrichedCorpus(region, state) {
     : Boolean(identity && Number(osmMeta?.pbfBytes) === Number(entry.pbfBytes));
   const currentSources = Array.isArray(meta?.sources)
     && regionAddressSourceIdentity(meta.sources) === enrichmentIdentity;
-  const validOutput = existsSync(regionJsonl(region))
-    ? statSync(regionJsonl(region)).size === Number(meta?.bytes)
-    : existsSync(regionJsonlGz(region));
-  if (Number(meta?.schemaVersion) !== 1
-    || Number(meta?.totalDocs) <= 0
-    || !currentPbf
-    || !currentSources
-    || !validOutput) return false;
+  const validOutput = existsSync(enriched)
+    ? statSync(enriched).size === Number(meta?.bytes)
+    : existsSync(`${enriched}.gz`);
+  const rejectionReasons = [
+    Number(meta?.schemaVersion) === 1 ? "" : "metadata schema",
+    Number(meta?.totalDocs) > 0 ? "" : "document count",
+    currentPbf ? "" : "PBF identity",
+    currentSources ? "" : "address-source identity",
+    validOutput ? "" : "output file"
+  ].filter(Boolean);
+  if (rejectionReasons.length) {
+    log(`${region.id}: completed enriched corpus cannot be recovered (${rejectionReasons.join(", ")})`);
+    return false;
+  }
   entry.docs = Number(meta.totalDocs);
   entry.extractIdentity = identity;
   entry.extractSchema = OSM_EXTRACTION_SCHEMA_VERSION;
