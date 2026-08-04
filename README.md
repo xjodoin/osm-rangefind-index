@@ -102,7 +102,7 @@ HEAD-verifies every URL — or trim `regions.json` to a subset any time.
 
 The first runs are an **acquisition phase**: download + extract + compress
 each region's corpus (PBFs are dropped immediately; footprint stays near
-the gzipped corpus total, ~12–15 GiB for the planet). Builds are gated
+the gzipped corpus total plus configured address-source partitions). Builds are gated
 until *all* regions have a corpus — otherwise each night's new arrivals
 would change the region set, regenerate the stats artifact, and invalidate
 every shard already built (`--partial` overrides the gate deliberately).
@@ -130,12 +130,20 @@ shared sequential preload instead of per-worker random reads. Direct R2
 uploads preserve packs-before-generation-manifests-before-root-
 manifest ordering for every shard.
 
+Rangefind streams completed `.jsonl.gz` corpora directly during scoring and
+full builds, so a planet stats pass no longer materializes every corpus at
+once. `INDEX_MIN_FREE_GIB` (default 24) preserves filesystem headroom; each
+active extraction also reserves a source-sized allowance, and acquisition
+pauses cleanly when the combined requirement cannot be met. Completed
+enrichment metadata is recovered after interruption, while failed partial
+outputs and SQLite scratch are removed automatically.
+
 Rough planet budget on a modern 12–16-core box: ~78 GiB of downloads
 (bandwidth-bound), a few hours of extraction, several hours for the stats
 pass, and on the order of 10–15 h of shard builds — i.e. **a weekend run
-plus a few nights**, all unattended. Disk: ~60 GiB free is comfortable
-(gzipped corpora + the stats pass's transient plain corpora + the largest
-region's build); steady state after publish is ~15 GiB.
+plus a few nights**, all unattended. Disk must cover the compressed OSM and
+configured address-source corpora, the largest active extraction/build, and
+the bounded upload queue; the updater enforces the configured safety reserve.
 
 Adding a region later re-runs the stats pass (region set changed) and
 therefore rebuilds all shards — batch additions, and expect that cycle to
@@ -245,7 +253,7 @@ Only selective manifest/term data is downloaded for a missing routing
 sidecar. After each region publishes, local artifacts are reclaimed
 automatically (disable with `--keep-artifacts`):
 the PBF and extractor caches are deleted, the corpus JSONL is compressed
-(it is the next diff base and the stats-regeneration input), and the local
+(it is the next diff base and is streamed directly into stats/full builds), and the local
 index copy is gutted to manifests + generation id-maps (what future deltas
 need). Steady state per region ≈ the gzipped corpus — e.g. Luxembourg
 ~17 MB on disk vs a 186 MB published index. Transient acquisition is bounded

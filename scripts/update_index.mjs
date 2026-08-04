@@ -49,7 +49,7 @@
 
 import { fork, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { basename, dirname, join, resolve } from "node:path";
 import { availableParallelism, hostname } from "node:os";
@@ -185,7 +185,19 @@ function loadJson(path, fallback) {
 }
 
 function saveState(state) {
-  writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
+  const tmp = `${STATE_PATH}.tmp`;
+  rmSync(tmp, { force: true });
+  writeFileSync(tmp, JSON.stringify(state, null, 2));
+  renameSync(tmp, STATE_PATH);
+}
+
+function loadState() {
+  if (!existsSync(STATE_PATH)) return { regions: {} };
+  try {
+    return JSON.parse(readFileSync(STATE_PATH, "utf8"));
+  } catch (error) {
+    throw new Error(`State file is invalid at ${STATE_PATH}; refusing to discard resumable build state: ${error.message}`);
+  }
 }
 
 function loadRegions(args) {
@@ -249,6 +261,7 @@ function loadRegions(args) {
       : 3 * 1024 ** 3,
     acquisitionConcurrency: Math.max(1, Math.min(4, Number(config.acquisitionConcurrency || 1))),
     largePbfBytes: Math.max(1, Number(config.largePbfBytes || 1024 ** 3)),
+    minFreeBytes: Math.max(1, Number(process.env.INDEX_MIN_FREE_GIB || config.minFreeGiB || 24)) * 1024 ** 3,
     publisher: String(config.publisher || ""),
     // Delta policy: past any of these, the region gets a full rebuild.
     maxGenerations: Math.max(1, Number(config.maxGenerations || 6)),
@@ -312,6 +325,14 @@ function hasCorpus(region) {
   return existsSync(regionJsonl(region)) || existsSync(regionJsonlGz(region));
 }
 
+function regionCorpusInput(region) {
+  const plain = regionJsonl(region);
+  if (existsSync(plain)) return plain;
+  const compressed = regionJsonlGz(region);
+  if (existsSync(compressed)) return compressed;
+  throw new Error(`${region.id}: no corpus (neither JSONL nor .gz) — needs refresh/extract first.`);
+}
+
 function bootstrapPublicationPending(regions, state, upload) {
   if (!regions.every(hasCorpus)) return false;
   const published = new Set(state.publishedRoot?.regionIds || []);
@@ -370,9 +391,102 @@ function cleanupExtractionScratch(region) {
     log(`${region.id}: cleaned ${files} extractor scratch file(s) (${(bytes / 1024 / 1024).toFixed(1)} MiB)`);
   }
   const rawOsm = regionOsmJsonl(region);
-  if (rawOsm !== regionJsonl(region) && existsSync(rawOsm) && existsSync(regionJsonl(region))) {
+  if (rawOsm !== regionJsonl(region) && existsSync(rawOsm) && hasCorpus(region)) {
     rmSync(rawOsm, { force: true });
   }
+}
+
+function cleanupFailedAcquisition(region) {
+  const dataDir = join(regionWorkRoot(region), "data");
+  for (const path of [
+    `${region.pbf}.download`,
+    `${regionJsonl(region)}.partial`,
+    `${regionJsonl(region)}.tmp`,
+    `${regionJsonlGz(region)}.tmp`
+  ]) rmSync(path, { force: true });
+  if (existsSync(dataDir)) {
+    for (const name of readdirSync(dataDir)) {
+      if (name.startsWith("address-enrichment.sqlite")) {
+        rmSync(join(dataDir, name), { recursive: true, force: true });
+      }
+    }
+  }
+  cleanupExtractionScratch(region);
+}
+
+function hydrateStateFromLocalArtifacts(regions, state) {
+  for (const region of regions) {
+    const entry = state.regions[region.id] || (state.regions[region.id] = {});
+    const manifest = loadJson(join(OUT, "shards", region.id, "manifest.json"), null);
+    const osmMeta = loadJson(`${regionOsmJsonl(region)}.meta.json`, null);
+    const enrichmentMeta = loadJson(`${regionJsonl(region)}.meta.json`, null);
+    if (!entry.pbfLastModified && manifest?.meta?.data_version) {
+      entry.pbfLastModified = String(manifest.meta.data_version);
+    }
+    if (!entry.pbfBytes && Number(osmMeta?.pbfBytes) > 0) {
+      entry.pbfBytes = Number(osmMeta.pbfBytes);
+    }
+    if (!entry.docs) {
+      entry.docs = Number(enrichmentMeta?.totalDocs ?? osmMeta?.docs ?? manifest?.total ?? 0);
+    }
+  }
+}
+
+class DiskHeadroomError extends Error {}
+
+function diskWorkingBytes(region, sourceBytes = 0) {
+  return Math.max(
+    region.addressSources?.length ? 16 * 1024 ** 3 : 8 * 1024 ** 3,
+    Number(sourceBytes || 0) * 6
+  );
+}
+
+function ensureDiskHeadroom(region, options, sourceBytes = 0, reservedBytes = 0) {
+  const disk = statfsSync(WORK);
+  const freeBytes = Number(disk.bavail) * Number(disk.bsize);
+  // Extraction can expand a PBF several-fold before the completed corpus is
+  // compressed. Preserve a hard reserve and a source-sized working allowance.
+  const workingBytes = diskWorkingBytes(region, sourceBytes);
+  const requiredBytes = options.minFreeBytes + workingBytes + reservedBytes;
+  if (freeBytes < requiredBytes) {
+    throw new DiskHeadroomError(
+      `${region.id}: ${(freeBytes / 1024 ** 3).toFixed(1)} GiB free; `
+      + `${(requiredBytes / 1024 ** 3).toFixed(1)} GiB required before extraction`
+    );
+  }
+}
+
+function recoverCompletedEnrichedCorpus(region, state) {
+  if (!region.preparedAddressSources?.length || !hasCorpus(region)) return false;
+  const entry = state.regions[region.id] || (state.regions[region.id] = {});
+  const identity = pbfIdentity(region, state);
+  const enrichmentIdentity = region.enrichmentIdentity || "";
+  const meta = loadJson(`${regionJsonl(region)}.meta.json`, null);
+  const osmMeta = loadJson(`${regionOsmJsonl(region)}.meta.json`, null);
+  const pbf = existsSync(region.pbf) ? statSync(region.pbf) : null;
+  const currentPbf = pbf
+    ? Number(osmMeta?.pbfBytes) === pbf.size && Math.floor(Number(osmMeta?.pbfMtimeMs)) === Math.floor(pbf.mtimeMs)
+    : Boolean(identity && Number(osmMeta?.pbfBytes) === Number(entry.pbfBytes));
+  const currentSources = Array.isArray(meta?.sources)
+    && regionAddressSourceIdentity(meta.sources) === enrichmentIdentity;
+  const currentOsm = Number(meta?.osm?.bytes) === Number(osmMeta?.bytes);
+  const validOutput = existsSync(regionJsonl(region))
+    ? statSync(regionJsonl(region)).size === Number(meta?.bytes)
+    : existsSync(regionJsonlGz(region));
+  if (Number(meta?.schemaVersion) !== 1
+    || Number(meta?.totalDocs) <= 0
+    || !currentPbf
+    || !currentSources
+    || !currentOsm
+    || !validOutput) return false;
+  entry.docs = Number(meta.totalDocs);
+  entry.extractIdentity = identity;
+  entry.extractSchema = OSM_EXTRACTION_SCHEMA_VERSION;
+  entry.enrichmentIdentity = enrichmentIdentity;
+  entry.additionalSources = additionalSourceMetadata(region.preparedAddressSources);
+  entry.overrides = region.overrides || null;
+  log(`${region.id}: recovered completed enriched corpus from durable metadata`);
+  return true;
 }
 
 // Identity of a region's current upstream corpus — stable across
@@ -504,6 +618,7 @@ async function extractJsonl(region, state) {
     && entry.extractSchema === OSM_EXTRACTION_SCHEMA_VERSION
     && (entry.enrichmentIdentity || "") === enrichmentIdentity
     && hasCorpus(region)) return false;
+  if (recoverCompletedEnrichedCorpus(region, state)) return true;
   if (!existsSync(region.pbf)) {
     throw new Error(`${region.id}: corpus is stale but the PBF is missing (refresh failed?)`);
   }
@@ -592,14 +707,13 @@ async function ensureScoringStats(regions, options, state, force, allowRegen = t
   }
 
   log(`scoring-stats: regenerating (${reason}) — this invalidates every shard build`);
-  for (const region of regions) await ensurePlainJsonl(region);
   const templatePath = join(WORK, "configs/_stats-template.json");
   mkdirSync(dirname(templatePath), { recursive: true });
   writeFileSync(templatePath, JSON.stringify(shardConfig(regions[0], options, "", null, state)));
   const templateConfig = await readConfig(templatePath);
   await collectScoringStats({
     config: templateConfig,
-    inputs: regions.map(region => ({ id: region.id, input: regionJsonl(region) })),
+    inputs: regions.map(region => ({ id: region.id, input: regionCorpusInput(region) })),
     outDir: STATS_DIR,
     log: line => log(line)
   });
@@ -613,7 +727,7 @@ function shardConfig(region, options, scoringStatsPath, input = null, state = nu
   const entry = state?.regions?.[region.id] || {};
   return createOsmIndexConfig({
     workerCount,
-    input: input || regionJsonl(region),
+    input: input || regionCorpusInput(region),
     output: join(OUT, "shards", region.id),
     buildProgressLogMs: 60000,
     additionalSources: entry.additionalSources || [],
@@ -709,7 +823,6 @@ async function planShardBuild(region, options, state) {
 }
 
 async function buildShard(region, options, budgetMs, plan, state) {
-  if (!plan.update) await ensurePlainJsonl(region);
   const configPath = join(WORK, "configs", `${region.id}${plan.update ? ".delta" : ""}.json`);
   mkdirSync(dirname(configPath), { recursive: true });
   writeFileSync(configPath, JSON.stringify(shardConfig(region, options, statsPath(), plan.update ? plan.input : null, state), null, 2));
@@ -1407,8 +1520,9 @@ async function main() {
     : regions;
   const options = loaded;
   mkdirSync(WORK, { recursive: true });
-  const state = loadJson(STATE_PATH, { regions: {} });
+  const state = loadState();
   state.regions = state.regions || {};
+  hydrateStateFromLocalArtifacts(allRegions, state);
 
   if (args.status) {
     printStatus(regions, state);
@@ -1499,6 +1613,8 @@ async function main() {
     const activeRegions = new Set();
     let acquisitionCursor = 0;
     let acquisitionCompleted = 0;
+    let acquisitionHalted = false;
+    let reservedExtractionBytes = 0;
     const reportAcquisition = region => updateProgress(
       "acquiring",
       region,
@@ -1507,14 +1623,16 @@ async function main() {
       { regions: [...activeRegions] }
     );
     const acquireRegions = async () => {
-      while (!outOfTime()) {
+      while (!outOfTime() && !acquisitionHalted) {
         const regionIndex = acquisitionCursor++;
         if (regionIndex >= regions.length) return;
         const region = regions[regionIndex];
         activeRegions.add(region.id);
         reportAcquisition(region);
         try {
+          ensureDiskHeadroom(region, options);
           await prepareRegionAddressSources(region, regions);
+          const recovered = recoverCompletedEnrichedCorpus(region, state);
           const source = await refreshPbf(region, state);
           const large = source.bytes >= options.largePbfBytes;
           if (large) {
@@ -1522,11 +1640,23 @@ async function main() {
           }
           const extracted = await withExtractionCapacity(
             large ? acquisitionConcurrency : 1,
-            () => extractJsonl(region, state)
+            async () => {
+              ensureDiskHeadroom(region, options, source.bytes, reservedExtractionBytes);
+              const reservation = diskWorkingBytes(region, source.bytes);
+              reservedExtractionBytes += reservation;
+              try {
+                return await extractJsonl(region, state);
+              } finally {
+                reservedExtractionBytes -= reservation;
+              }
+            }
           );
-          if (extracted) {
+          if (extracted || recovered) {
             log(`${region.id}: corpus refreshed (${(state.regions[region.id].docs || 0).toLocaleString()} docs)`);
-            if (!state.regions[region.id].builtFingerprint) {
+            const builtBuilderVersion = previouslyBuiltBuilderVersion(state.regions[region.id]);
+            if (!state.regions[region.id].builtFingerprint
+                || args.forceStats
+                || builtBuilderVersion !== RANGEFIND_BUILDER_VERSION) {
               // Bring-up acquisition: no shard exists yet, so the corpus is
               // not a diff base — compress it now and drop the PBF, keeping
               // the acquisition footprint near the gzipped corpus total
@@ -1542,7 +1672,13 @@ async function main() {
           cleanupExtractionScratch(region);
           saveState(state);
         } catch (error) {
-          log(`${region.id}: refresh/extract failed — ${error.message} (continuing)`);
+          cleanupFailedAcquisition(region);
+          if (error instanceof DiskHeadroomError) {
+            acquisitionHalted = true;
+            log(`Acquisition paused for disk safety — ${error.message}`);
+          } else {
+            log(`${region.id}: refresh/extract failed — ${error.message} (continuing)`);
+          }
         } finally {
           activeRegions.delete(region.id);
           acquisitionCompleted++;
