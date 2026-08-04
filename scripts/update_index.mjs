@@ -311,6 +311,14 @@ function regionOsmJsonl(region) {
   return join(regionWorkRoot(region), "data/osm-places.jsonl");
 }
 
+function regionOsmCorpusInput(region) {
+  const plain = regionOsmJsonl(region);
+  if (existsSync(plain)) return plain;
+  const compressed = `${plain}.gz`;
+  if (existsSync(compressed)) return compressed;
+  return plain;
+}
+
 function regionEnrichedJsonl(region) {
   return join(regionWorkRoot(region), "data/osm-enriched-places.jsonl");
 }
@@ -400,8 +408,9 @@ function cleanupExtractionScratch(region) {
     log(`${region.id}: cleaned ${files} extractor scratch file(s) (${(bytes / 1024 / 1024).toFixed(1)} MiB)`);
   }
   const rawOsm = regionOsmJsonl(region);
-  if (rawOsm !== regionJsonl(region) && existsSync(rawOsm) && hasCorpus(region)) {
+  if (rawOsm !== regionJsonl(region) && hasCorpus(region)) {
     rmSync(rawOsm, { force: true });
+    rmSync(`${rawOsm}.gz`, { force: true });
   }
 }
 
@@ -641,12 +650,21 @@ async function extractJsonl(region, state) {
   // The compressed snapshot stays: it is the corpus the built shard
   // reflects and the base the delta diff runs against. Cleanup replaces it
   // only after the shard is rebuilt/updated and uploaded.
-  const osmMeta = await extractOsmPlaces({
+  const priorOsmMeta = loadJson(`${regionOsmJsonl(region)}.meta.json`, null);
+  const pbf = statSync(region.pbf);
+  const reusableOsm = Number(priorOsmMeta?.schemaVersion) === OSM_EXTRACTION_SCHEMA_VERSION
+    && existsSync(regionOsmCorpusInput(region))
+    && Number(priorOsmMeta?.pbfBytes) === pbf.size
+    && Math.floor(Number(priorOsmMeta?.pbfMtimeMs)) === Math.floor(pbf.mtimeMs);
+  const osmMeta = reusableOsm ? priorOsmMeta : await extractOsmPlaces({
     region: region.id,
     pbf: region.pbf,
     root: regionWorkRoot(region),
     rqa: false
   });
+  if (reusableOsm && regionOsmCorpusInput(region).endsWith(".gz")) {
+    log(`${region.id}: reusing compressed OSM base corpus`);
+  }
   if (Number(osmMeta.schemaVersion) !== OSM_EXTRACTION_SCHEMA_VERSION) {
     throw new Error(`${region.id}: Rangefind OSM extraction schema ${osmMeta.schemaVersion || "unknown"}; expected ${OSM_EXTRACTION_SCHEMA_VERSION}`);
   }
@@ -664,7 +682,7 @@ async function extractJsonl(region, state) {
     ));
     const enriched = await rangefindOsmNode.augmentOsmWithAddressSources({
       root: regionWorkRoot(region),
-      osmPath: regionOsmJsonl(region),
+      osmPath: regionOsmCorpusInput(region),
       outputPath: regionJsonl(region),
       sources,
       osmDocs: Number(osmMeta.docs || 0),
