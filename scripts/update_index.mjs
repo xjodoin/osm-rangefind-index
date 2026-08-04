@@ -1610,7 +1610,8 @@ async function main() {
   // built (and, for uploaded runs, included in the published root). Without
   // this gate, daily upstream changes can consume every nightly window and
   // starve the initial build forever.
-  const buildFirst = !args.regions
+  const buildFirst = !args.forceStats
+    && !args.regions
     && !args.partial
     && bootstrapPublicationPending(regions, state, args.upload);
   if (args.finalizeOnly) {
