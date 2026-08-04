@@ -406,7 +406,9 @@ function cleanupFailedAcquisition(region) {
   ]) rmSync(path, { force: true });
   if (existsSync(dataDir)) {
     for (const name of readdirSync(dataDir)) {
-      if (name.startsWith("address-enrichment.sqlite")) {
+      if (name.endsWith(".partial")
+          || name.endsWith(".download")
+          || name.startsWith("address-enrichment.sqlite")) {
         rmSync(join(dataDir, name), { recursive: true, force: true });
       }
     }
@@ -469,7 +471,6 @@ function recoverCompletedEnrichedCorpus(region, state) {
     : Boolean(identity && Number(osmMeta?.pbfBytes) === Number(entry.pbfBytes));
   const currentSources = Array.isArray(meta?.sources)
     && regionAddressSourceIdentity(meta.sources) === enrichmentIdentity;
-  const currentOsm = Number(meta?.osm?.bytes) === Number(osmMeta?.bytes);
   const validOutput = existsSync(regionJsonl(region))
     ? statSync(regionJsonl(region)).size === Number(meta?.bytes)
     : existsSync(regionJsonlGz(region));
@@ -477,7 +478,6 @@ function recoverCompletedEnrichedCorpus(region, state) {
     || Number(meta?.totalDocs) <= 0
     || !currentPbf
     || !currentSources
-    || !currentOsm
     || !validOutput) return false;
   entry.docs = Number(meta.totalDocs);
   entry.extractIdentity = identity;
