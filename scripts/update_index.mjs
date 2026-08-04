@@ -1667,7 +1667,11 @@ async function main() {
         reportAcquisition(region);
         try {
           ensureDiskHeadroom(region, options);
-          await prepareRegionAddressSources(region, regions);
+          // Global spatial partitions are keyed by the complete production
+          // region topology even during a --regions repair run. Using the
+          // selected subset here would invalidate and rebuild the planet
+          // partition for a one-shard operation.
+          await prepareRegionAddressSources(region, allRegions);
           const recovered = recoverCompletedEnrichedCorpus(region, state);
           const source = await refreshPbf(region, state);
           const large = source.bytes >= options.largePbfBytes;
