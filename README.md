@@ -122,11 +122,13 @@ configuration), so downloads and normal-sized extracts can overlap. A PBF at
 or above `largePbfBytes` (default 1 GiB) consumes every lane and extracts
 alone to protect memory on the 31 GiB production host. Stats and shard builds
 remain sequential; each shard build already uses the configured CPU worker
-pool. `partitionReducerWorkers` is capped separately (default `4`) because
-each reducer owns a bounded code-store preload; this keeps large shards out of
-memory reclaim without reducing scan/extraction parallelism. The shipped
+pool. `partitionReducerWorkers` is capped separately (default `8`) to saturate
+continent-scale reduction without tying it to scan parallelism. The shipped
 `codeStoreWorkerPreloadMaxBytes` is 3 GiB so large OSM filter stores use one
-shared sequential preload instead of per-worker random reads. Direct R2
+shared sequential preload instead of per-worker random reads. Rangefind's OSM
+schema summarizes only the six high-value category, type, prominence,
+population, and coordinate columns; compact facet cells keep that shared set
+inside the preload budget. Direct R2
 uploads preserve packs-before-generation-manifests-before-root-
 manifest ordering for every shard.
 

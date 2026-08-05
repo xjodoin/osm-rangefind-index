@@ -266,11 +266,9 @@ function loadRegions(args) {
     regions,
     statsDriftRatio: Number(config.statsDriftRatio || 0.1),
     workerCount: Number(config.workerCount || 0),
-    // Reducers preload a bounded code-store window per worker. Reusing every
-    // scan worker here multiplies that window and can force a large shard into
-    // sustained cgroup reclaim. Keep scan parallelism high, but give reduction
-    // its own deliberately smaller pool.
-    partitionReducerWorkers: Math.max(1, Number(config.partitionReducerWorkers) || 4),
+    // Reducers share the compact hot-column preload. Keep a separate cap from
+    // scan parallelism, but use enough workers to saturate continent reducers.
+    partitionReducerWorkers: Math.max(1, Number(config.partitionReducerWorkers) || 8),
     // The production OSM schema has enough filter columns that a large shard's
     // code store can exceed Rangefind's conservative 1.5 GiB default. A shared
     // preload avoids hundreds of millions of tiny random reads and is allocated
