@@ -972,6 +972,14 @@ async function publishRoadCatalog(regions, state, options, store, upload) {
 
 async function runRoadOnly({ regions, allRegions, state, options, store, args, remaining, outOfTime, updateProgress }) {
   if (!options.roadIndexes.enabled) throw new Error("--roads-only requires roadIndexes.enabled in regions.json.");
+  let catalogPublishTail = Promise.resolve();
+  const publishCatalog = () => {
+    const publication = catalogPublishTail.then(() => (
+      publishRoadCatalog(allRegions, state, options, store, args.upload)
+    ));
+    catalogPublishTail = publication.catch(() => {});
+    return publication;
+  };
   const current = region => roadIndexesCurrent({
     region: roadIdentityRegion(region, state),
     state,
@@ -982,8 +990,11 @@ async function runRoadOnly({ regions, allRegions, state, options, store, args, r
   let pending = regions.filter(region => !current(region));
   const total = pending.length;
   let completed = 0;
+  // A resumed backfill may already have durable profiles that were uploaded
+  // before its previous stop. Publish those immediately instead of waiting
+  // for another region (or the whole planet) to finish.
+  await publishCatalog();
   if (!pending.length) {
-    await publishRoadCatalog(allRegions, state, options, store, args.upload);
     log("Road-only: every selected regional profile is current.");
     return true;
   }
@@ -1026,6 +1037,10 @@ async function runRoadOnly({ regions, allRegions, state, options, store, args, r
             reservedWorkingBytes += reservation;
             try {
               await ensureRoadIndexes(region, state, options, store, args, remaining);
+              // Region workers run concurrently, but mutable catalog writes
+              // must remain ordered so an older snapshot cannot overwrite a
+              // newer one. Each publication re-reads current durable state.
+              await publishCatalog();
             } finally {
               reservedWorkingBytes -= reservation;
             }
@@ -1047,7 +1062,7 @@ async function runRoadOnly({ regions, allRegions, state, options, store, args, r
       }
     };
     await Promise.all(Array.from({ length: concurrency }, () => work()));
-    await publishRoadCatalog(allRegions, state, options, store, args.upload);
+    await publishCatalog();
     if (haltError) throw haltError;
     lastFailures = failures;
     pending = [
@@ -1061,7 +1076,7 @@ async function runRoadOnly({ regions, allRegions, state, options, store, args, r
       + `${lastFailures.length} region(s) failed; first was ${lastFailures[0].region.id}: ${lastFailures[0].error.message}`
     );
   }
-  await publishRoadCatalog(allRegions, state, options, store, args.upload);
+  await publishCatalog();
   return regions.every(current);
 }
 
