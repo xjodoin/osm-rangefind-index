@@ -6,6 +6,7 @@ import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   collectManifestProtections,
+  collectRoadCatalogProtections,
   createProtections,
   generationManifestPath,
   updateCandidateState
@@ -78,11 +79,30 @@ async function loadProtections(store) {
     }
   });
 
+  let roadCatalogText = "";
+  try {
+    roadCatalogText = await store.getText("routes/catalog.json");
+    collectRoadCatalogProtections(JSON.parse(roadCatalogText), "routes/catalog.json", protections);
+  } catch (error) {
+    if (Number(error?.$metadata?.httpStatusCode || 0) !== 404 && error?.name !== "NoSuchKey") throw error;
+  }
+
   return {
     protections,
-    rootHash: createHash("sha256").update(rootText).digest("hex"),
+    rootHash: createHash("sha256").update(rootText).update("\n").update(roadCatalogText).digest("hex"),
     shards: shards.length
   };
+}
+
+async function publicationHash(store) {
+  const searchRoot = await store.getText("manifest.min.json");
+  let roads = "";
+  try {
+    roads = await store.getText("routes/catalog.json");
+  } catch (error) {
+    if (Number(error?.$metadata?.httpStatusCode || 0) !== 404 && error?.name !== "NoSuchKey") throw error;
+  }
+  return createHash("sha256").update(searchRoot).update("\n").update(roads).digest("hex");
 }
 
 async function listObjects(store) {
@@ -121,7 +141,7 @@ async function main() {
     now,
     graceMs: args.graceDays * 86400_000
   });
-  const rootHashAfter = createHash("sha256").update(await store.getText("manifest.min.json")).digest("hex");
+  const rootHashAfter = await publicationHash(store);
   if (rootHashAfter !== live.rootHash) throw new Error("Root manifest changed during the GC scan; refusing to continue.");
 
   const report = {

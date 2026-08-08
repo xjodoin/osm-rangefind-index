@@ -5273,6 +5273,21 @@
   "codeStoreWorkerPreloadMaxBytes": 3221225472,
   "acquisitionConcurrency": 2,
   "largePbfBytes": 1073741824,
+  "roadIndexes": {
+    "enabled": true,
+    "profiles": [
+      "car",
+      "bike",
+      "foot"
+    ],
+    "turnCosts": true,
+    "leafNodes": 1280,
+    "fanout": 8,
+    "topMaxCells": 8,
+    "packBytes": 2097152,
+    "maxShards": 8,
+    "targetPbfBytesPerShard": 536870912
+  },
   "publisher": "",
   "maxGenerations": 6,
   "maxDeletedRatio": 0.005,

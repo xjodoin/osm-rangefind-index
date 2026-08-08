@@ -63,6 +63,19 @@ export function createProtections() {
   return { paths: new Set(), basenames: new Set(), prefixes: new Set() };
 }
 
+export function collectRoadCatalogProtections(catalog, catalogPath, protections) {
+  protections.paths.add(catalogPath);
+  for (const index of catalog?.indexes || []) {
+    const base = safeRelativePath(index?.base);
+    // Route roots contain their pack table in a compact binary object, so the
+    // JSON catalog cannot enumerate each live pack. Protect exactly the live
+    // regional prefix; update-time --prune owns superseded objects inside it.
+    if (base?.startsWith("routes/") && base !== "routes/catalog.json") {
+      protections.prefixes.add(`${base.replace(/\/$/u, "")}/`);
+    }
+  }
+}
+
 export function isProtectedObject(path, protections) {
   if (protections.paths.has(path) || protections.basenames.has(posix.basename(path))) return true;
   for (const prefix of protections.prefixes) {

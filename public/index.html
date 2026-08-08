@@ -79,7 +79,7 @@
 
     .metrics {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
+      grid-template-columns: repeat(5, minmax(0, 1fr));
       gap: 1rem;
     }
 
@@ -247,6 +247,11 @@
             <span class="metric-detail">searchable OSM places</span>
           </div>
           <div class="metric">
+            <span class="metric-label">Road graphs</span>
+            <strong id="roads" class="metric-value">—</strong>
+            <span id="roads-detail" class="metric-detail">regional itinerary indexes</span>
+          </div>
+          <div class="metric">
             <span class="metric-label">Latest data</span>
             <strong id="data-date" class="metric-value">—</strong>
             <span id="data-detail" class="metric-detail">Geofabrik source date</span>
@@ -290,6 +295,7 @@ const result = await search.search({
           <a href="manifest.min.json"><span>Compact manifest</span><code>manifest.min.json</code></a>
           <a href="manifest.json"><span>Full manifest</span><code>manifest.json</code></a>
           <a href="status.json"><span>Indexer status</span><code>status.json</code></a>
+          <a href="routes/catalog.json"><span>Route catalog</span><code>routes/catalog.json</code></a>
         </div>
         <pre><code>const nearby = await search.search({
   q: "",
@@ -338,7 +344,7 @@ const result = await search.search({
     }
 
     function render(status) {
-      const { index, run } = status;
+      const { index, run, roadIndexes } = status;
       const badge = document.getElementById("phase-badge");
       const visualPhase = run.state === "running" ? "running" : index.phase;
       badge.className = `badge ${visualPhase}`;
@@ -349,6 +355,12 @@ const result = await search.search({
       setText("published", `${number.format(index.publishedShards)} / ${number.format(index.totalRegions)}`);
       setText("published-detail", `${index.publicationPercent}% of target shards`);
       setText("documents", number.format(index.publishedDocuments));
+      setText("roads", roadIndexes?.enabled
+        ? `${number.format(roadIndexes.catalogEntries)} / ${number.format(roadIndexes.total)}`
+        : "Disabled");
+      setText("roads-detail", roadIndexes?.enabled
+        ? `${number.format(roadIndexes.uploaded)} uploaded · ${number.format(roadIndexes.unavailable)} unavailable`
+        : "regional itinerary indexes");
       setText("data-date", formatDate(index.latestDataAt));
       setText("data-detail", index.latestDataAt ? "newest source represented" : "awaiting first corpus");
       setText("status-updated", formatDate(status.generatedAt, true));

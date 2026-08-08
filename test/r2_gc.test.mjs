@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   collectManifestProtections,
+  collectRoadCatalogProtections,
   createProtections,
   generationManifestPath,
   isProtectedObject,
@@ -50,6 +51,21 @@ test("protects binary lexicon hot-list namespaces that are only referenced trans
   assert.equal(isProtectedObject("shards/quebec/authority/hot/live.bin.gz", protections), true);
   assert.equal(isProtectedObject("authority/hot/live.bin.gz", protections), true);
   assert.equal(isProtectedObject("shards/quebec/gen-0001/authority/hot/old.bin.gz", protections), false);
+});
+
+test("protects live route prefixes whose pack table is stored in a binary root", () => {
+  const protections = createProtections();
+  collectRoadCatalogProtections({
+    indexes: [
+      { base: "routes/car/quebec/" },
+      { base: "routes/bike/ontario/" },
+      { base: "../unsafe/" }
+    ]
+  }, "routes/catalog.json", protections);
+  assert.equal(isProtectedObject("routes/car/quebec/shards/00/pack.live.bin", protections), true);
+  assert.equal(isProtectedObject("routes/bike/ontario/root.live.bin.gz", protections), true);
+  assert.equal(isProtectedObject("routes/car/alberta/root.old.bin.gz", protections), false);
+  assert.equal(isProtectedObject("unsafe/object.bin", protections), false);
 });
 
 test("requires a continuously unreferenced grace period before deletion", () => {

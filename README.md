@@ -4,7 +4,8 @@ Scheduled pipeline that builds a **sharded [Rangefind](../rangefind) OSM
 index** (one shard per Geofabrik region, exact cross-shard scoring via a
 frozen scoring-stats artifact) and publishes it **incrementally to Cloudflare
 R2** — designed to run on a server that is only idle at night and on
-weekends.
+weekends. The same PBF pass also publishes static, range-addressed road graphs
+for client-only routing, travel-time matrices, and itinerary planning.
 
 Every run makes as much progress as fits before its deadline and stops
 cleanly; interrupted shard builds resume from rangefind's stage checkpoints
@@ -15,7 +16,7 @@ content-addressed and published directly through Cloudflare's S3 API.
 ## Setup
 
 ```sh
-npm install                       # rangefind ^0.3.0 from npm
+npm install                       # installs the pinned Rangefind feature line
 cp .env.example .env              # fill in direct R2/S3 credentials
 chmod +x scripts/nightly.sh
 # edit regions.json — one entry per shard (Geofabrik path)
@@ -82,6 +83,47 @@ throughput with deterministic synthetic country/subdivision overlap. Use
 `-- --jobs N --rows-per-job N --parallelism N --network-delay-ms N` to model a
 specific host or source profile.
 
+## Road indexes and itinerary planning
+
+`roadIndexes` in `regions.json` enables Rangefind's `rfroutegraph-v1` lane.
+For every configured profile, the updater reuses the region PBF while it is
+already local, extracts a turn-aware OSM road graph in an isolated process,
+builds a CRP/MLD index, uploads its immutable packs, and only then publishes
+its `manifest.json`. The source graph, build-only node order, route index, and
+PBF are removed after a durable upload. R2 therefore retains only the files a
+client can request; local disk remains bounded to the active region.
+
+The shipped production configuration enables `car`, `bike`, and `foot`, with
+an independent graph for each travel profile. Turn restrictions, one-way
+roads, access tags, roundabouts, conditional/max speeds, junction delays,
+road geometry, names, classes, and turn costs come from OSM and the Rangefind
+profile. Internal shard count scales with PBF size up to `maxShards`, keeping
+large regional graphs range-efficient without burdening small islands with
+empty shards.
+
+Each durable graph is discoverable through `routes/catalog.json`. A catalog
+entry contains its region bbox and ISO metadata, profile, base URL, source
+vintage, and route manifest. All itinerary stops must belong to the same
+regional graph. This is an honest boundary: independently clipped Geofabrik
+extracts cannot provide exact cross-border connectivity. A future planet
+graph builder can replace the catalog policy without changing any regional
+index format.
+
+The route lane is incremental and resumable at region/profile boundaries:
+
+- unchanged source + builder identities do no work;
+- an interrupted upload reuses the completed local graph;
+- a Rangefind route-format change rebuilds only road indexes, not search;
+- regions with no connected network are recorded as unavailable and omitted
+  from the catalog rather than blocking the planet run;
+- the R2 garbage collector protects every catalog-referenced route prefix,
+  while update-time `--prune` removes superseded objects inside that prefix.
+
+Run `npm run benchmark:roads` for a real-PBF end-to-end smoke benchmark. It
+downloads Liechtenstein into a temporary directory, exercises the production
+extract/build worker, opens the result through positional file reads, and
+calculates a real route. Set `ROAD_BENCH_PBF_URL` to test another extract.
+
 ## The shard set
 
 `regions.json` ships with the **full planet: 310 shards** (187 countries
@@ -100,8 +142,9 @@ HEAD-verifies every URL — or trim `regions.json` to a subset any time.
 
 ## Initial bring-up
 
-The first runs are an **acquisition phase**: download + extract + compress
-each region's corpus (PBFs are dropped immediately; footprint stays near
+The first runs are an **acquisition phase**: download, extract search and road
+artifacts, publish each completed road graph, then compress each region's
+corpus (PBFs are dropped immediately; footprint stays near
 the gzipped corpus total plus configured address-source partitions). Builds are gated
 until *all* regions have a corpus — otherwise each night's new arrivals
 would change the region set, regenerate the stats artifact, and invalidate
@@ -159,17 +202,25 @@ npm run update -- --deadline 06:15    # stop cleanly before the workday
 npm run update -- --regions quebec    # limit to one region
 npm run status                         # what's built / uploaded / pending
 npm run update -- --prune             # occasional: delete unreferenced packs on R2
+npm run update:roads -- --prune       # publish roads without touching search shards or scoring stats
 npm run gc:r2                          # dry-run manifest-aware R2 garbage collection
 npm run gc:r2 -- --apply              # track/delete objects after the grace period
 npm run refresh:root-lexicon           # stage a category-lexicon root refresh
 npm run refresh:root-lexicon -- --upload # conditionally publish it to R2
 node scripts/update_index.mjs --finalize-only --max-hours 8 # publish existing completed shards and routing
+node scripts/update_index.mjs --no-road-indexes # emergency: run only the place-search lane
 ```
 
 A region-scoped production run rebuilds only the selected regions but
 publishes them into the complete existing root; it never replaces the planet
 root with a one-shard manifest. `--partial` is the explicit isolated
 bring-up mode.
+
+Use `npm run update:roads -- --prune` for the first road-index rollout after a
+search index is already complete. It bypasses address enrichment, search
+extraction, scoring stats, search builds, and the search root—even if the
+normal service command carries `--force-stats`. Later normal update cycles
+refresh a changed region's place and road indexes from the same PBF download.
 
 The root-lexicon refresh does not rebuild shards. Upload mode shares the
 indexer's process lock, requires every shard vocabulary to be readable, and
@@ -204,6 +255,7 @@ default; `INDEX_LOG_FILE` selects a different file as shown above.
 |---|---|---|
 | PBF download | Geofabrik `Last-Modified` changed | one HEAD request |
 | JSONL extract | PBF version changed | skipped |
+| road graph/index | PBF, profile, road options, or Rangefind route builder changed | none |
 | scoring stats | region set changed, corpus drift > `statsDriftRatio` (default 10%), or `--force-stats` | none |
 | shard update | corpus or stats changed | none |
 | upload | built fingerprint ≠ uploaded fingerprint | none |
@@ -254,7 +306,7 @@ run only establishes the grace-period baseline, and every run writes
 Only selective manifest/term data is downloaded for a missing routing
 sidecar. After each region publishes, local artifacts are reclaimed
 automatically (disable with `--keep-artifacts`):
-the PBF and extractor caches are deleted, the corpus JSONL is compressed
+the PBF, road source/index, and extractor caches are deleted, the corpus JSONL is compressed
 (it is the next diff base and is streamed directly into stats/full builds), and the local
 index copy is gutted to manifests + generation id-maps (what future deltas
 need). Steady state per region ≈ the gzipped corpus — e.g. Luxembourg
@@ -274,6 +326,26 @@ import { createSearch } from "rangefind";        // browser
 const engine = await createSearch({ baseUrl: "https://osm.example.com/" });
 await engine.search({ q: "1234 rue sainte-catherine", size: 5 });
 await engine.search({ q: "", geo: { near: { lat: 45.5, lon: -73.6 }, sort: "distance" } });
+```
+
+For a route or optimized multi-stop itinerary, select a catalog entry whose
+bbox contains every stop and open its regional graph directly:
+
+```js
+import { openRouteGraphUrl } from "rangefind/route";
+
+const catalog = await fetch("https://osm.rangefind.dev/routes/catalog.json").then(r => r.json());
+const quebec = catalog.indexes.find(index => index.region === "quebec" && index.profile === "car");
+const roads = await openRouteGraphUrl(`https://osm.rangefind.dev/${quebec.base}`);
+
+const trip = await roads.itinerary({
+  stops: [
+    { lat: 45.5019, lon: -73.5674 },
+    { lat: 45.6066, lon: -73.7124 },
+    { lat: 45.5088, lon: -73.5540 }
+  ],
+  openEnd: true
+});
 ```
 
 `deploy/cloudflare-cache-rules.json` enables a one-year edge and browser TTL

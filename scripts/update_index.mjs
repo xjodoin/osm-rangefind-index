@@ -43,13 +43,13 @@
 // Usage:
 //   node scripts/update_index.mjs [--deadline HH:MM] [--max-hours N]
 //     [--regions id,id] [--no-upload] [--force-stats] [--prune]
-//     [--keep-artifacts] [--finalize-only] [--status]
+//     [--keep-artifacts] [--finalize-only] [--roads-only] [--status]
 //
 // Environment (see .env.example): direct Cloudflare R2/S3 credentials.
 
 import { fork, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, createReadStream, createWriteStream, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, renameSync, rmSync, statfsSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { basename, dirname, join, resolve } from "node:path";
 import { availableParallelism, hostname } from "node:os";
@@ -105,6 +105,12 @@ import {
   regionRoutingMetadata,
   spatialPartitionForRegion
 } from "./lib/address_sources.mjs";
+import {
+  buildRoadCatalog,
+  normalizeRoadIndexConfig,
+  roadIndexesCurrent,
+  roadProfileIdentity
+} from "./lib/road_indexes.mjs";
 
 const { createOsmIndexConfig } = rangefindOsmNode;
 
@@ -122,6 +128,7 @@ const STATE_PATH = join(WORK, "state.json");
 const LOCK_PATH = join(WORK, ".lock");
 const STATS_DIR = join(WORK, "scoring-stats");
 const CORPUS_DELTA_WORKER = join(projectRoot, "scripts/compute_delta_worker.mjs");
+const ROAD_INDEX_WORKER = join(projectRoot, "scripts/road_index_worker.mjs");
 const SOURCE_REQUEST_TIMEOUT_MS = Math.max(
   1_000,
   Number(process.env.SOURCE_REQUEST_TIMEOUT_MS || 30_000)
@@ -158,7 +165,9 @@ function parseArgs(argv) {
     partial: false,
     textRouting: true,
     suggestRouting: true,
-    categoryLexicon: true
+    categoryLexicon: true,
+    roadIndexes: true,
+    roadsOnly: false
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
@@ -175,6 +184,8 @@ function parseArgs(argv) {
     else if (arg === "--no-text-routing") args.textRouting = false;
     else if (arg === "--no-suggest-routing") args.suggestRouting = false;
     else if (arg === "--no-category-lexicon") args.categoryLexicon = false;
+    else if (arg === "--no-road-indexes") args.roadIndexes = false;
+    else if (arg === "--roads-only") args.roadsOnly = true;
     else throw new Error(`Unknown argument: ${arg}`);
   }
   return args;
@@ -278,6 +289,9 @@ function loadRegions(args) {
       : 3 * 1024 ** 3,
     acquisitionConcurrency: Math.max(1, Math.min(4, Number(config.acquisitionConcurrency || 1))),
     largePbfBytes: Math.max(1, Number(config.largePbfBytes || 1024 ** 3)),
+    roadIndexes: args.roadIndexes
+      ? normalizeRoadIndexConfig(config.roadIndexes)
+      : normalizeRoadIndexConfig(null),
     minFreeBytes: Math.max(1, Number(process.env.INDEX_MIN_FREE_GIB || config.minFreeGiB || 24)) * 1024 ** 3,
     publisher: String(config.publisher || ""),
     // Delta policy: past any of these, the region gets a full rebuild.
@@ -367,6 +381,24 @@ function regionCorpusInput(region) {
   throw new Error(`${region.id}: no corpus (neither JSONL nor .gz) — needs refresh/extract first.`);
 }
 
+function roadProfileRoot(region, profile) {
+  return join(regionWorkRoot(region), "roads", profile);
+}
+
+function roadSourcePath(region, profile) {
+  return join(roadProfileRoot(region, profile), "graph.bin");
+}
+
+function roadIndexDir(region, profile) {
+  return join(OUT, "routes", profile, region.id);
+}
+
+function roadIdentityRegion(region, state) {
+  return region.pinned
+    ? { ...region, pbfIdentity: pbfIdentity(region, state) }
+    : region;
+}
+
 function bootstrapPublicationPending(regions, state, upload) {
   if (!regions.every(hasCorpus)) return false;
   const published = new Set(state.publishedRoot?.regionIds || []);
@@ -446,6 +478,13 @@ function cleanupFailedAcquisition(region) {
           || name.startsWith("address-enrichment.sqlite")) {
         rmSync(join(dataDir, name), { recursive: true, force: true });
       }
+    }
+  }
+  const roadsDir = join(regionWorkRoot(region), "roads");
+  if (existsSync(roadsDir)) {
+    for (const profile of readdirSync(roadsDir)) {
+      rmSync(join(roadsDir, profile, "graph.bin.partial"), { force: true });
+      rmSync(`${roadIndexDir(region, profile)}.partial`, { recursive: true, force: true });
     }
   }
   cleanupExtractionScratch(region);
@@ -597,7 +636,7 @@ async function prepareRegionAddressSources(region, regions, { reuseCached = fals
   region.enrichmentIdentity = regionAddressSourceIdentity(region.preparedAddressSources);
 }
 
-async function refreshPbf(region, state) {
+async function refreshPbf(region, state, { roadIndexes = null, requireRoadUpload = true } = {}) {
   if (region.pinned) {
     if (!existsSync(region.pbf)) throw new Error(`${region.id}: pinned PBF missing at ${region.pbf}`);
     return { bytes: statSync(region.pbf).size };
@@ -622,7 +661,16 @@ async function refreshPbf(region, state) {
     && entry.extractSchema === OSM_EXTRACTION_SCHEMA_VERSION
     && enrichmentCurrent
     && hasCorpus(region);
-  if (current && (existsSync(region.pbf) || extractionCurrent)) return { bytes: bytes || entry.pbfBytes || 0 };
+  const roadsCurrent = !roadIndexes?.enabled || roadIndexesCurrent({
+    region,
+    state,
+    config: roadIndexes,
+    rangefindVersion: RANGEFIND_VERSION,
+    requireUploaded: requireRoadUpload
+  });
+  if (current && (existsSync(region.pbf) || (extractionCurrent && roadsCurrent))) {
+    return { bytes: bytes || entry.pbfBytes || 0 };
+  }
 
   log(`${region.id}: downloading ${url} (${lastModified || "unknown date"})`);
   mkdirSync(dirname(region.pbf), { recursive: true });
@@ -715,6 +763,306 @@ async function extractJsonl(region, state) {
   entry.additionalSources = additionalSourceMetadata(region.preparedAddressSources || []);
   entry.overrides = region.overrides || null;
   return true;
+}
+
+// --- regional road indexes --------------------------------------------------
+
+function runRoadWorker(config, budgetMs = Infinity) {
+  const configPath = join(
+    WORK,
+    "configs",
+    `roads-${config.region}-${config.profile}-${config.mode}.json`
+  );
+  mkdirSync(dirname(configPath), { recursive: true });
+  writeFileSync(configPath, `${JSON.stringify(config, null, 2)}\n`);
+  const heapMb = Math.max(2048, Math.min(24576, Number(process.env.ROAD_INDEX_HEAP_MB || 16384) || 16384));
+  return new Promise((resolveDone, rejectDone) => {
+    const child = spawn(
+      process.execPath,
+      [`--max-old-space-size=${heapMb}`, ROAD_INDEX_WORKER, configPath],
+      { stdio: "inherit" }
+    );
+    const timer = budgetMs < Infinity
+      ? setTimeout(() => child.kill("SIGTERM"), Math.max(0, budgetMs))
+      : null;
+    child.on("error", rejectDone);
+    child.on("exit", (code, signal) => {
+      if (timer) clearTimeout(timer);
+      if (code === 0) resolveDone();
+      else rejectDone(new Error(`road-index ${config.mode} worker failed (${signal || `exit ${code}`})`));
+    });
+  });
+}
+
+function roadSourceHeader(path) {
+  const handle = openSync(path, "r");
+  const chunks = [];
+  let total = 0;
+  try {
+    while (total < 16 * 1024 * 1024) {
+      const chunk = Buffer.allocUnsafe(64 * 1024);
+      const bytesRead = readSync(handle, chunk, 0, chunk.length, total);
+      if (!bytesRead) break;
+      chunks.push(chunk.subarray(0, bytesRead));
+      total += bytesRead;
+      const bytes = Buffer.concat(chunks);
+      const newline = bytes.indexOf(0x0a);
+      if (newline >= 0) return JSON.parse(bytes.subarray(0, newline).toString("utf8"));
+    }
+  } finally {
+    closeSync(handle);
+  }
+  throw new Error(`Road graph source has no bounded JSON header: ${path}`);
+}
+
+async function uploadRoadIndex(region, profile, store, prune) {
+  const local = roadIndexDir(region, profile);
+  const target = `routes/${profile}/${region.id}`;
+  const publish = partitionPublishFiles(local);
+  const content = publish.content.filter(file => file.relative !== "node-order.bin");
+  const started = Date.now();
+  const result = await store.putFiles(content, target);
+  await store.putFiles(publish.dependencyManifests, target);
+  await store.putFiles(publish.rootManifests, target);
+  if (prune) {
+    const keep = new Set([
+      ...content,
+      ...publish.dependencyManifests,
+      ...publish.rootManifests
+    ].map(file => `${target}/${file.relative}`));
+    const stale = (await store.listObjects(`${target}/`))
+      .map(object => object.path)
+      .filter(path => !keep.has(path));
+    await store.deleteObjects(stale);
+    if (stale.length) log(`${region.id}/${profile}: pruned ${stale.length.toLocaleString()} superseded road object(s).`);
+  }
+  log(`${region.id}/${profile}: uploaded ${result.files.toLocaleString()} immutable road file(s), ${(result.bytes / 1024 / 1024).toFixed(1)} MiB in ${Math.round((Date.now() - started) / 1000)}s.`);
+}
+
+async function ensureRoadIndexes(region, state, options, store, args, remaining) {
+  const config = options.roadIndexes;
+  if (!config.enabled) return;
+  const entry = state.regions[region.id] || (state.regions[region.id] = {});
+  entry.roadIndexes ||= {};
+  for (const profile of config.profiles) {
+    const identity = roadProfileIdentity({
+      region: roadIdentityRegion(region, state),
+      state,
+      config,
+      profile,
+      rangefindVersion: RANGEFIND_VERSION
+    });
+    if (!identity) throw new Error(`${region.id}/${profile}: source identity is unavailable.`);
+    const profileState = entry.roadIndexes[profile] || (entry.roadIndexes[profile] = {});
+    const output = roadIndexDir(region, profile);
+    let locallyCurrent = profileState.builtFingerprint === identity.fingerprint
+      && existsSync(join(roadIndexDir(region, profile), "manifest.json"));
+    const recoveredMarker = loadJson(join(output, "_build/identity.json"), null);
+    if (!locallyCurrent && recoveredMarker?.fingerprint === identity.fingerprint) {
+      const recoveredManifest = loadJson(join(output, "manifest.json"), null);
+      if (recoveredManifest?.format === "rfroutegraph-v1" && recoveredManifest?.profile === profile) {
+        profileState.builtFingerprint = identity.fingerprint;
+        profileState.builtRangefindVersion = RANGEFIND_VERSION;
+        profileState.manifest = recoveredManifest;
+        locallyCurrent = true;
+        saveState(state);
+        log(`${region.id}/${profile}: recovered completed route graph from its build identity.`);
+      }
+    }
+    const remotelyCurrent = profileState.uploadedFingerprint === identity.fingerprint;
+    if ((args.upload && remotelyCurrent) || (!args.upload && locallyCurrent)) continue;
+    if (!existsSync(region.pbf)) {
+      throw new Error(`${region.id}/${profile}: road index is stale but the PBF is missing.`);
+    }
+    if (remaining() < 5 * 60_000) throw new Error(`${region.id}/${profile}: deadline reserve reached before road build.`);
+
+    const source = roadSourcePath(region, profile);
+    const recoveredSource = loadJson(`${source}.identity.json`, null);
+    if (profileState.sourceFingerprint !== identity.sourceFingerprint
+        && recoveredSource?.fingerprint === identity.sourceFingerprint
+        && existsSync(source)) {
+      profileState.sourceFingerprint = identity.sourceFingerprint;
+      saveState(state);
+      log(`${region.id}/${profile}: recovered completed OSM road extraction from its source identity.`);
+    }
+    if (profileState.sourceFingerprint !== identity.sourceFingerprint || !existsSync(source)) {
+      log(`${region.id}/${profile}: extracting OSM road graph.`);
+      await runRoadWorker({
+        mode: "extract",
+        region: region.id,
+        profile,
+        pbf: region.pbf,
+        source,
+        turnCosts: config.turnCosts,
+        sourceFingerprint: identity.sourceFingerprint,
+        rangefindVersion: RANGEFIND_VERSION
+      }, remaining() - 2 * 60_000);
+      profileState.sourceFingerprint = identity.sourceFingerprint;
+      profileState.builtFingerprint = "";
+      profileState.uploadedFingerprint = "";
+      profileState.manifest = null;
+      saveState(state);
+    }
+    const header = await roadSourceHeader(source);
+    if (Number(header.nodes || 0) < 2 || Number(header.edges || 0) < 1) {
+      profileState.builtFingerprint = identity.fingerprint;
+      profileState.uploadedFingerprint = identity.fingerprint;
+      profileState.manifest = null;
+      profileState.unavailable = `No connected ${profile} road network in this extract.`;
+      rmSync(source, { force: true });
+      rmSync(`${source}.identity.json`, { force: true });
+      saveState(state);
+      log(`${region.id}/${profile}: no connected road network; catalog entry omitted.`);
+      continue;
+    }
+    if (!locallyCurrent) {
+      log(`${region.id}/${profile}: building ${identity.buildOptions.shards}-shard range-addressed route graph.`);
+      await runRoadWorker({
+        mode: "build",
+        region: region.id,
+        profile,
+        source,
+        output,
+        fingerprint: identity.fingerprint,
+        rangefindVersion: RANGEFIND_VERSION,
+        buildOptions: identity.buildOptions
+      }, remaining() - 2 * 60_000);
+      const manifest = loadJson(join(output, "manifest.json"), null);
+      if (manifest?.format !== "rfroutegraph-v1" || manifest?.profile !== profile) {
+        throw new Error(`${region.id}/${profile}: route graph manifest failed validation.`);
+      }
+      profileState.builtFingerprint = identity.fingerprint;
+      profileState.builtRangefindVersion = RANGEFIND_VERSION;
+      profileState.manifest = manifest;
+      profileState.unavailable = null;
+      saveState(state);
+    }
+    if (args.upload) {
+      await uploadRoadIndex(region, profile, store, args.prune);
+      profileState.uploadedFingerprint = identity.fingerprint;
+      saveState(state);
+      if (!args.keepArtifacts) {
+        rmSync(output, { recursive: true, force: true });
+        rmSync(source, { force: true });
+        rmSync(`${source}.identity.json`, { force: true });
+      }
+    }
+  }
+}
+
+async function publishRoadCatalog(regions, state, options, store, upload) {
+  if (!options.roadIndexes.enabled) return;
+  const catalog = buildRoadCatalog({
+    regions,
+    state,
+    config: options.roadIndexes,
+    requireUploaded: upload
+  });
+  const path = join(OUT, "routes", "catalog.json");
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(catalog, null, 2)}\n`);
+  if (upload && (catalog.indexes.length || state.roadCatalogPublishedCount)) {
+    await store.putFile(path, "routes/catalog.json");
+    state.roadCatalogPublishedCount = catalog.indexes.length;
+    state.roadCatalogPublishedAt = new Date().toISOString();
+    saveState(state);
+  }
+  log(`Road catalog: ${catalog.indexes.length}/${regions.length * options.roadIndexes.profiles.length} regional profile index(es).`);
+}
+
+async function runRoadOnly({ regions, allRegions, state, options, store, args, remaining, outOfTime, updateProgress }) {
+  if (!options.roadIndexes.enabled) throw new Error("--roads-only requires roadIndexes.enabled in regions.json.");
+  const current = region => roadIndexesCurrent({
+    region: roadIdentityRegion(region, state),
+    state,
+    config: options.roadIndexes,
+    rangefindVersion: RANGEFIND_VERSION,
+    requireUploaded: args.upload
+  });
+  let pending = regions.filter(region => !current(region));
+  const total = pending.length;
+  let completed = 0;
+  if (!pending.length) {
+    await publishRoadCatalog(allRegions, state, options, store, args.upload);
+    log("Road-only: every selected regional profile is current.");
+    return true;
+  }
+
+  const concurrency = Math.min(options.acquisitionConcurrency, pending.length);
+  const withCapacity = createWeightedLimiter(concurrency);
+  let reservedWorkingBytes = 0;
+  log(`Road-only: ${pending.length} region(s) need route graphs; ${concurrency} extraction lane(s).`);
+  let lastFailures = [];
+  let haltError = null;
+  for (let attempt = 1; pending.length && attempt <= ACQUISITION_MAX_ATTEMPTS; attempt++) {
+    if (outOfTime()) break;
+    if (attempt > 1) {
+      const waitMs = Math.min(5 * 60_000, ACQUISITION_RETRY_BASE_MS * (3 ** (attempt - 2)));
+      log(`Road-only: retrying ${pending.length} region(s), attempt ${attempt}/${ACQUISITION_MAX_ATTEMPTS}, in ${(waitMs / 1000).toFixed(0)}s.`);
+      await delay(waitMs);
+    }
+    let cursor = 0;
+    const failures = [];
+    const attempted = new Set();
+    const work = async () => {
+      while (!outOfTime() && !haltError) {
+        const index = cursor++;
+        if (index >= pending.length) return;
+        const region = pending[index];
+        attempted.add(region.id);
+        updateProgress("road-indexing", region, completed, total, {
+          profiles: options.roadIndexes.profiles
+        });
+        try {
+          ensureDiskHeadroom(region, options);
+          const source = await refreshPbf(region, state, {
+            roadIndexes: options.roadIndexes,
+            requireRoadUpload: args.upload
+          });
+          const large = source.bytes >= options.largePbfBytes;
+          await withCapacity(large ? concurrency : 1, async () => {
+            ensureDiskHeadroom(region, options, source.bytes, reservedWorkingBytes);
+            const reservation = diskWorkingBytes(region, source.bytes);
+            reservedWorkingBytes += reservation;
+            try {
+              await ensureRoadIndexes(region, state, options, store, args, remaining);
+            } finally {
+              reservedWorkingBytes -= reservation;
+            }
+          });
+          if (!region.pinned) rmSync(region.pbf, { force: true });
+          completed++;
+          updateProgress("road-indexing", region, completed, total, {
+            profiles: options.roadIndexes.profiles
+          });
+        } catch (error) {
+          failures.push({ region, error });
+          if (error instanceof DiskHeadroomError) {
+            haltError ||= error;
+            log(`Road-only paused for disk safety — ${error.message}`);
+          } else {
+            log(`${region.id}: road indexing failed — ${error.message} (attempt ${attempt}/${ACQUISITION_MAX_ATTEMPTS})`);
+          }
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: concurrency }, () => work()));
+    await publishRoadCatalog(allRegions, state, options, store, args.upload);
+    if (haltError) throw haltError;
+    lastFailures = failures;
+    pending = [
+      ...failures.map(failure => failure.region),
+      ...pending.filter(region => !attempted.has(region.id))
+    ];
+  }
+  if (lastFailures.length && !outOfTime()) {
+    throw new Error(
+      `Road-only indexing incomplete after ${ACQUISITION_MAX_ATTEMPTS} attempt(s): `
+      + `${lastFailures.length} region(s) failed; first was ${lastFailures[0].region.id}: ${lastFailures[0].error.message}`
+    );
+  }
+  await publishRoadCatalog(allRegions, state, options, store, args.upload);
+  return regions.every(current);
 }
 
 // Diffs the fresh extraction against the snapshot the shard was built from.
@@ -1312,7 +1660,7 @@ async function buildCategoryLexiconRootArtifact(built, state, args, outOfTime) {
   }
 }
 
-function statusSnapshot(regions, state) {
+function statusSnapshot(regions, state, roadConfig = { enabled: false, profiles: [] }) {
   const rows = regions.map(region => {
     const entry = state.regions[region.id] || {};
     const acquired = hasCorpus(region);
@@ -1350,6 +1698,20 @@ function statusSnapshot(regions, state) {
     ? Math.round((value / totalRegions) * 1000) / 10
     : 0;
 
+  const roadRows = roadConfig.enabled
+    ? regions.flatMap(region => roadConfig.profiles.map(profile => ({
+        region,
+        profile,
+        state: state.regions[region.id]?.roadIndexes?.[profile] || {}
+      })))
+    : [];
+  const builtRoadIndexes = roadRows.filter(row => row.state.builtFingerprint && row.state.manifest).length;
+  const uploadedRoadIndexes = roadRows.filter(row => (
+    row.state.manifest
+    && row.state.uploadedFingerprint === row.state.builtFingerprint
+  )).length;
+  const unavailableRoadIndexes = roadRows.filter(row => row.state.builtFingerprint && !row.state.manifest).length;
+
   return {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
@@ -1380,17 +1742,32 @@ function statusSnapshot(regions, state) {
         .slice(0, 10)
         .map(row => row.region.id)
     },
+    roadIndexes: {
+      enabled: roadConfig.enabled,
+      profiles: roadConfig.profiles,
+      total: roadRows.length,
+      built: builtRoadIndexes,
+      uploaded: uploadedRoadIndexes,
+      unavailable: unavailableRoadIndexes,
+      catalogEntries: Number(state.roadCatalogPublishedCount || 0),
+      catalogPublishedAt: state.roadCatalogPublishedAt || null,
+      nextPending: roadRows
+        .filter(row => !row.state.builtFingerprint)
+        .slice(0, 10)
+        .map(row => `${row.region.id}/${row.profile}`)
+    },
     endpoints: {
       manifest: "manifest.min.json",
-      status: "status.json"
+      status: "status.json",
+      ...(roadConfig.enabled ? { routeCatalog: "routes/catalog.json" } : {})
     }
   };
 }
 
-function writeStatusArtifacts(regions, state) {
+function writeStatusArtifacts(regions, state, roadConfig) {
   mkdirSync(OUT, { recursive: true });
   writeFileSync(join(OUT, "index.html"), readFileSync(join(projectRoot, "public/index.html")));
-  writeFileSync(join(OUT, "status.json"), `${JSON.stringify(statusSnapshot(regions, state), null, 2)}\n`);
+  writeFileSync(join(OUT, "status.json"), `${JSON.stringify(statusSnapshot(regions, state, roadConfig), null, 2)}\n`);
 }
 
 let statusUploadTail = Promise.resolve();
@@ -1427,9 +1804,9 @@ async function flushStatusUploads(store) {
   }
 }
 
-function publishStatusArtifacts(regions, state, store, upload, includePage = false) {
+function publishStatusArtifacts(regions, state, store, upload, includePage = false, roadConfig = null) {
   try {
-    writeStatusArtifacts(regions, state);
+    writeStatusArtifacts(regions, state, roadConfig || { enabled: false, profiles: [] });
     if (upload) {
       statusUploadRequested = true;
       statusPageRequested ||= includePage;
@@ -1545,7 +1922,7 @@ async function uploadAndCleanupShard(region, state, store, args) {
 
 // --- status ------------------------------------------------------------------
 
-function printStatus(regions, state) {
+function printStatus(regions, state, roadConfig = { enabled: false, profiles: [] }) {
   for (const region of regions) {
     const entry = state.regions[region.id] || {};
     const built = entry.builtFingerprint && existsSync(join(OUT, "shards", region.id, "manifest.min.json"));
@@ -1558,6 +1935,15 @@ function printStatus(regions, state) {
       `del-pending ${entry.deletedPending || 0}`,
       entry.pbfLastModified || ""
     ].join("  "));
+  }
+  if (roadConfig.enabled) {
+    const rows = regions.flatMap(region => roadConfig.profiles.map(profile => (
+      state.regions[region.id]?.roadIndexes?.[profile] || {}
+    )));
+    const built = rows.filter(entry => entry.builtFingerprint && entry.manifest).length;
+    const uploaded = rows.filter(entry => entry.manifest && entry.uploadedFingerprint === entry.builtFingerprint).length;
+    const unavailable = rows.filter(entry => entry.builtFingerprint && !entry.manifest).length;
+    console.log(`roads            ${built}/${rows.length} built  ${uploaded}/${rows.length} uploaded  ${unavailable} unavailable`);
   }
 }
 
@@ -1577,7 +1963,7 @@ async function main() {
   hydrateStateFromLocalArtifacts(allRegions, state);
 
   if (args.status) {
-    printStatus(regions, state);
+    printStatus(regions, state, options.roadIndexes);
     return;
   }
 
@@ -1585,7 +1971,7 @@ async function main() {
   acquireLock();
   let acquisitionSession = state.acquisitionSession || null;
   let resumedAcquisition = false;
-  if (!args.finalizeOnly) {
+  if (!args.finalizeOnly && !args.roadsOnly) {
     const signature = acquisitionSessionSignature({
       extractionSchema: OSM_EXTRACTION_SCHEMA_VERSION,
       rangefindBuilder: RANGEFIND_BUILDER_VERSION,
@@ -1625,7 +2011,7 @@ async function main() {
   if (resumedAcquisition) {
     log(`Resuming acquisition cycle: ${acquisitionSession.completedRegionIds.length}/${regions.length} region(s) already complete; cached address-source snapshot frozen.`);
   }
-  publishStatusArtifacts(allRegions, state, store, args.upload, true);
+  publishStatusArtifacts(allRegions, state, store, args.upload, true, options.roadIndexes);
   const updateProgress = (stage, region = null, completed = 0, total = regions.length, extra = {}) => {
     state.run.progress = {
       stage,
@@ -1636,7 +2022,7 @@ async function main() {
       updatedAt: new Date().toISOString()
     };
     saveState(state);
-    publishStatusArtifacts(allRegions, state, store, args.upload);
+    publishStatusArtifacts(allRegions, state, store, args.upload, false, options.roadIndexes);
   };
   const configuredUploadQueueDepth = Number(process.env.R2_UPLOAD_QUEUE_DEPTH || 2);
   const uploadQueueDepth = Number.isInteger(configuredUploadQueueDepth) && configuredUploadQueueDepth > 0
@@ -1646,7 +2032,7 @@ async function main() {
   const uploadLanes = Number.isInteger(configuredUploadLanes) && configuredUploadLanes > 0
     ? Math.min(configuredUploadLanes, uploadQueueDepth)
     : Math.min(2, uploadQueueDepth);
-  const uploadQueue = args.upload
+  const uploadQueue = args.upload && !args.roadsOnly
     ? createTaskQueue({ maxPending: uploadQueueDepth, concurrency: uploadLanes })
     : null;
   const queueShardUpload = async region => {
@@ -1654,7 +2040,7 @@ async function main() {
       log(`${region.id}: background upload started.`);
       try {
         await uploadAndCleanupShard(region, state, store, args);
-        publishStatusArtifacts(allRegions, state, store, true);
+        publishStatusArtifacts(allRegions, state, store, true, false, options.roadIndexes);
       } catch (error) {
         log(`${region.id}: background upload failed — ${error.message}`);
         throw error;
@@ -1669,6 +2055,22 @@ async function main() {
   let pipelineComplete = false;
 
   try {
+
+  if (args.roadsOnly) {
+    pipelineComplete = await runRoadOnly({
+      regions,
+      allRegions,
+      state,
+      options,
+      store,
+      args,
+      remaining,
+      outOfTime,
+      updateProgress
+    });
+    log("Road-only run finished.");
+    return;
+  }
 
   // 1 + 2: refresh and extract selected regions. Once every corpus exists,
   // the initial build takes priority until every selected shard has been
@@ -1742,7 +2144,10 @@ async function main() {
             // partition for a one-shard operation.
             await prepareRegionAddressSources(region, allRegions, { reuseCached: resumedAcquisition });
             const recovered = recoverCompletedEnrichedCorpus(region, state);
-            const source = await refreshPbf(region, state);
+            const source = await refreshPbf(region, state, {
+              roadIndexes: options.roadIndexes,
+              requireRoadUpload: args.upload
+            });
             const large = source.bytes >= options.largePbfBytes;
             if (large) {
               log(`${region.id}: large PBF (${(source.bytes / 1024 / 1024 / 1024).toFixed(1)} GiB) — extracting exclusively`);
@@ -1754,7 +2159,9 @@ async function main() {
                 const reservation = diskWorkingBytes(region, source.bytes);
                 reservedExtractionBytes += reservation;
                 try {
-                  return await extractJsonl(region, state);
+                  const placeCorpusChanged = await extractJsonl(region, state);
+                  await ensureRoadIndexes(region, state, options, store, args, remaining);
+                  return placeCorpusChanged;
                 } finally {
                   reservedExtractionBytes -= reservation;
                 }
@@ -1801,6 +2208,7 @@ async function main() {
         }
       };
       await Promise.all(Array.from({ length: acquisitionConcurrency }, () => acquireRegions()));
+      await publishRoadCatalog(allRegions, state, options, store, args.upload);
       finalFailures = failures;
       pending = failures.map(failure => failure.region);
     }
@@ -2084,6 +2492,15 @@ async function main() {
       }
     });
   }
+  await publishRoadCatalog(allRegions, state, options, store, args.upload);
+  const roadPipelineComplete = regions.every(region => roadIndexesCurrent({
+    region: roadIdentityRegion(region, state),
+    state,
+    config: options.roadIndexes,
+    rangefindVersion: RANGEFIND_VERSION,
+    requireUploaded: args.upload
+  }));
+  pipelineComplete = pipelineComplete && roadPipelineComplete;
   log("Run finished.");
   } catch (error) {
     runError = error;
@@ -2098,9 +2515,9 @@ async function main() {
       error: runError ? String(runError.message || runError).slice(0, 500) : null
     };
     if (!runError) state.lastSuccessfulRunAt = completedAt;
-    if (!runError && pipelineComplete) delete state.acquisitionSession;
+    if (!runError && pipelineComplete && !args.roadsOnly) delete state.acquisitionSession;
     saveState(state);
-    publishStatusArtifacts(allRegions, state, store, args.upload);
+    publishStatusArtifacts(allRegions, state, store, args.upload, false, options.roadIndexes);
     if (args.upload) await flushStatusUploads(store);
     store?.close();
   }
