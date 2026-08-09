@@ -37,7 +37,10 @@ if (config.mode === "extract") {
   rmSync(temporary, { recursive: true, force: true });
   mkdirSync(temporary, { recursive: true });
   const graph = await extractor.readRoadGraph(config.source);
-  const summary = buildRouteGraph(graph, temporary, { ...config.buildOptions, log });
+  // This isolated worker exits after one profile and never reuses the source
+  // graph. Release consumed coordinate/topology columns while overlays are
+  // materialized so country-scale builds stay below MemoryHigh.
+  const summary = buildRouteGraph(graph, temporary, { ...config.buildOptions, releaseSource: true, log });
   rmSync(join(temporary, "node-order.bin"), { force: true });
   mkdirSync(join(temporary, "_build"), { recursive: true });
   writeFileSync(join(temporary, "_build/identity.json"), `${JSON.stringify({
