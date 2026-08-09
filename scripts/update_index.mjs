@@ -123,9 +123,9 @@ const RANGEFIND_VERSION = taskRequire("rangefind/package.json").version;
 // semantics, and bump it deliberately when artifacts really must be rebuilt.
 const RANGEFIND_BUILDER_VERSION = "0.4.13";
 // Route artifacts are versioned independently from search artifacts. Rangefind
-// 0.4.13 changes authority/suggestion output; 0.4.14 optimizes extraction and
-// 0.4.15 streams serialization. Both produce byte-identical road graphs to
-// 0.4.12, so keep completed profiles reusable. Bump only when route bytes change.
+// 0.4.13 changes authority/suggestion output; 0.4.14 optimizes extraction,
+// 0.4.15 streams serialization, and 0.4.16 bounds SCC materialization. They
+// produce byte-identical graphs to 0.4.12, so keep completed profiles reusable.
 const RANGEFIND_ROAD_BUILDER_VERSION = "0.4.12";
 const WORK = join(projectRoot, "work");
 const OUT = join(WORK, "public/rangefind");
