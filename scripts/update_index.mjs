@@ -121,7 +121,12 @@ const RANGEFIND_VERSION = taskRequire("rangefind/package.json").version;
 // Runtime-only releases must not invalidate every published shard. Keep this
 // at the newest Rangefind release that changed builder output or analysis
 // semantics, and bump it deliberately when artifacts really must be rebuilt.
-const RANGEFIND_BUILDER_VERSION = "0.4.3";
+const RANGEFIND_BUILDER_VERSION = "0.4.13";
+// Route artifacts are versioned independently from search artifacts. Rangefind
+// 0.4.13 changes authority/suggestion output but produces byte-identical road
+// graphs to 0.4.12, so keep completed road profiles reusable across this
+// upgrade. Bump only when OSM road extraction or route-graph output changes.
+const RANGEFIND_ROAD_BUILDER_VERSION = "0.4.12";
 const WORK = join(projectRoot, "work");
 const OUT = join(WORK, "public/rangefind");
 const STATE_PATH = join(WORK, "state.json");
@@ -665,7 +670,7 @@ async function refreshPbf(region, state, { roadIndexes = null, requireRoadUpload
     region,
     state,
     config: roadIndexes,
-    rangefindVersion: RANGEFIND_VERSION,
+    rangefindVersion: RANGEFIND_ROAD_BUILDER_VERSION,
     requireUploaded: requireRoadUpload
   });
   if (current && (existsSync(region.pbf) || (extractionCurrent && roadsCurrent))) {
@@ -850,7 +855,7 @@ async function ensureRoadIndexes(region, state, options, store, args, remaining)
       state,
       config,
       profile,
-      rangefindVersion: RANGEFIND_VERSION
+      rangefindVersion: RANGEFIND_ROAD_BUILDER_VERSION
     });
     if (!identity) throw new Error(`${region.id}/${profile}: source identity is unavailable.`);
     const profileState = entry.roadIndexes[profile] || (entry.roadIndexes[profile] = {});
@@ -862,7 +867,7 @@ async function ensureRoadIndexes(region, state, options, store, args, remaining)
       const recoveredManifest = loadJson(join(output, "manifest.json"), null);
       if (recoveredManifest?.format === "rfroutegraph-v1" && recoveredManifest?.profile === profile) {
         profileState.builtFingerprint = identity.fingerprint;
-        profileState.builtRangefindVersion = RANGEFIND_VERSION;
+        profileState.builtRangefindVersion = RANGEFIND_ROAD_BUILDER_VERSION;
         profileState.manifest = recoveredManifest;
         locallyCurrent = true;
         saveState(state);
@@ -895,7 +900,7 @@ async function ensureRoadIndexes(region, state, options, store, args, remaining)
         source,
         turnCosts: config.turnCosts,
         sourceFingerprint: identity.sourceFingerprint,
-        rangefindVersion: RANGEFIND_VERSION
+        rangefindVersion: RANGEFIND_ROAD_BUILDER_VERSION
       }, remaining() - 2 * 60_000);
       profileState.sourceFingerprint = identity.sourceFingerprint;
       profileState.builtFingerprint = "";
@@ -924,7 +929,7 @@ async function ensureRoadIndexes(region, state, options, store, args, remaining)
         source,
         output,
         fingerprint: identity.fingerprint,
-        rangefindVersion: RANGEFIND_VERSION,
+        rangefindVersion: RANGEFIND_ROAD_BUILDER_VERSION,
         buildOptions: identity.buildOptions
       }, remaining() - 2 * 60_000);
       const manifest = loadJson(join(output, "manifest.json"), null);
@@ -932,7 +937,7 @@ async function ensureRoadIndexes(region, state, options, store, args, remaining)
         throw new Error(`${region.id}/${profile}: route graph manifest failed validation.`);
       }
       profileState.builtFingerprint = identity.fingerprint;
-      profileState.builtRangefindVersion = RANGEFIND_VERSION;
+      profileState.builtRangefindVersion = RANGEFIND_ROAD_BUILDER_VERSION;
       profileState.manifest = manifest;
       profileState.unavailable = null;
       saveState(state);
@@ -984,7 +989,7 @@ async function runRoadOnly({ regions, allRegions, state, options, store, args, r
     region: roadIdentityRegion(region, state),
     state,
     config: options.roadIndexes,
-    rangefindVersion: RANGEFIND_VERSION,
+    rangefindVersion: RANGEFIND_ROAD_BUILDER_VERSION,
     requireUploaded: args.upload
   });
   let pending = regions.filter(region => !current(region));
@@ -2512,7 +2517,7 @@ async function main() {
     region: roadIdentityRegion(region, state),
     state,
     config: options.roadIndexes,
-    rangefindVersion: RANGEFIND_VERSION,
+    rangefindVersion: RANGEFIND_ROAD_BUILDER_VERSION,
     requireUploaded: args.upload
   }));
   pipelineComplete = pipelineComplete && roadPipelineComplete;
