@@ -108,6 +108,7 @@ import {
 import {
   buildRoadCatalog,
   normalizeRoadIndexConfig,
+  roadFederationNeighbors,
   roadIndexesCurrent,
   roadProfileIdentity
 } from "./lib/road_indexes.mjs";
@@ -126,9 +127,10 @@ const RANGEFIND_BUILDER_VERSION = "0.4.13";
 // 0.4.13 changes authority/suggestion output; 0.4.14 optimizes extraction,
 // 0.4.15 streams serialization, 0.4.16 bounds SCC materialization, 0.4.17
 // streams large graph reads, 0.4.18 compacts overlay materialization, and
-// 0.4.19 bounds turn expansion and compacts SCC output in place. They produce
-// byte-identical graphs to 0.4.12, so keep completed profiles reusable.
-const RANGEFIND_ROAD_BUILDER_VERSION = "0.4.12";
+// 0.4.19 bounds turn expansion and compacts SCC output in place. 0.4.20 adds
+// shared-OSM-id portal sidecars and therefore deliberately invalidates road
+// artifacts even though the regional rfroutegraph-v1 packs stay compatible.
+const RANGEFIND_ROAD_BUILDER_VERSION = "0.4.20";
 const WORK = join(projectRoot, "work");
 const OUT = join(WORK, "public/rangefind");
 const STATE_PATH = join(WORK, "state.json");
@@ -901,6 +903,7 @@ async function ensureRoadIndexes(region, state, options, store, args, remaining)
         pbf: region.pbf,
         source,
         turnCosts: config.turnCosts,
+        portalRegions: region.federationNeighbors || [],
         sourceFingerprint: identity.sourceFingerprint,
         rangefindVersion: RANGEFIND_ROAD_BUILDER_VERSION
       }, remaining() - 2 * 60_000);
@@ -1978,6 +1981,10 @@ async function main() {
   const allRegions = args.regions
     ? loadRegions({ ...args, regions: null }).regions
     : regions;
+  const federationNeighbors = roadFederationNeighbors(allRegions);
+  for (const region of [...allRegions, ...regions]) {
+    region.federationNeighbors = federationNeighbors.get(region.id) || [];
+  }
   const options = loaded;
   mkdirSync(WORK, { recursive: true });
   const state = loadState();

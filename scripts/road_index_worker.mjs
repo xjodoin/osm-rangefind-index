@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
-import { buildRouteGraph } from "rangefind/route/build";
+import * as routeBuild from "rangefind/route/build";
 
 const configPath = process.argv[2];
 if (!configPath) throw new Error("usage: road_index_worker.mjs <config.json>");
@@ -12,6 +12,10 @@ const config = JSON.parse(readFileSync(configPath, "utf8"));
 const taskRequire = createRequire(import.meta.url);
 const rangefindRoot = dirname(taskRequire.resolve("rangefind/package.json"));
 const extractor = await import(pathToFileURL(join(rangefindRoot, "scripts/osm_road_graph.mjs")));
+if (extractor.ROAD_SOURCE_FORMAT !== "rfroutesrc-v8" || routeBuild.ROUTE_PORTAL_FORMAT !== "rfrouteportals-v1") {
+  throw new Error("Inter-region road builds require rangefind >= 0.4.20; install the released package before indexing.");
+}
+const { buildRouteGraph } = routeBuild;
 const log = message => console.log(`Rangefind roads: ${message}`);
 
 if (config.mode === "extract") {
@@ -21,6 +25,7 @@ if (config.mode === "extract") {
   const graph = extractor.extractRoadGraph(config.pbf, {
     profile: config.profile,
     turnCosts: config.turnCosts,
+    portalRegions: config.portalRegions || [],
     log
   });
   extractor.writeRoadGraph(temporary, graph);
