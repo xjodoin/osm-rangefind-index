@@ -1,13 +1,13 @@
 # Rollout: regional route graphs and itinerary planning
 
 This rollout adds `rfroutegraph-v1` objects under `routes/<profile>/<region>/`,
-immutable `rfrouteportals-v1` sidecars, and the mutable discovery root
+immutable `rfrouteportals-v2` range packs, and the mutable discovery root
 `routes/catalog.json`. It does not change the place-search manifest or any
 existing search pack.
 
 The catalog advertises `coverage: "federated-regions"`. Its bbox neighbor lists
 are candidate discovery only. A client connects two regional graphs only after
-both content-addressed sidecars prove the same OSM junction id and coordinate;
+both content-addressed neighbor ranges prove the same OSM junction id and coordinate;
 there is no proximity fallback.
 
 ## First production build
@@ -58,12 +58,13 @@ Expected results:
 
 - the catalog format is `rangefind-route-catalog-v1`;
 - every entry's manifest format is `rfroutegraph-v1`;
-- every durable entry advertises a content-addressed `portals.*.json.gz` file;
+- every durable entry advertises a content-addressed `portals.*.bin` file with
+  independent `ids` and `records` ranges per candidate neighbor;
 - `coverage` is `federated-regions` and
   `requiresAllStopsInOneRegion` is false;
 - catalog and manifests are uncached mutable JSON;
-- `root.*.bin.gz` and pack range requests return `206` and are cached as
-  immutable objects;
+- `root.*.bin.gz`, route packs, and portal range requests return `206` and are
+  cached as immutable objects;
 - `status.json.roadIndexes.catalogEntries` grows throughout the rollout;
 - normal search continues serving its existing root throughout.
 

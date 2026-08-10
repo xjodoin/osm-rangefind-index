@@ -12,8 +12,8 @@ const config = JSON.parse(readFileSync(configPath, "utf8"));
 const taskRequire = createRequire(import.meta.url);
 const rangefindRoot = dirname(taskRequire.resolve("rangefind/package.json"));
 const extractor = await import(pathToFileURL(join(rangefindRoot, "scripts/osm_road_graph.mjs")));
-if (extractor.ROAD_SOURCE_FORMAT !== "rfroutesrc-v8" || routeBuild.ROUTE_PORTAL_FORMAT !== "rfrouteportals-v1") {
-  throw new Error("Inter-region road builds require rangefind >= 0.4.20; install the released package before indexing.");
+if (extractor.ROAD_SOURCE_FORMAT !== "rfroutesrc-v8" || routeBuild.ROUTE_PORTAL_FORMAT !== "rfrouteportals-v2") {
+  throw new Error("Range-addressed inter-region road builds require rangefind >= 0.4.21; install the released package before indexing.");
 }
 const { buildRouteGraph } = routeBuild;
 const log = message => console.log(`Rangefind roads: ${message}`);

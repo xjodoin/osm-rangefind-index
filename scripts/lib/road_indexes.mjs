@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 
 export const ROAD_CATALOG_FORMAT = "rangefind-route-catalog-v1";
 export const ROAD_GRAPH_FORMAT = "rfroutegraph-v1";
-export const ROAD_PORTAL_FORMAT = "rfrouteportals-v1";
+export const ROAD_PORTAL_FORMAT = "rfrouteportals-v2";
 export const ROAD_SOURCE_FORMAT = "rfroutesrc-v8";
-export const ROAD_PIPELINE_SCHEMA = 2;
+export const ROAD_PIPELINE_SCHEMA = 3;
 
 const SUPPORTED_PROFILES = new Set(["car", "bike", "foot"]);
 

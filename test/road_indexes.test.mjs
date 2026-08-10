@@ -68,7 +68,13 @@ test("catalog exposes only durable indexes and the federated-region contract", (
     roadIndexes: { car: {
       builtFingerprint: "current",
       uploadedFingerprint: "current",
-      manifest: { format: "rfroutegraph-v1", profile: "car", nodes: 10, edges: 20, portals: "portals.json" }
+      manifest: {
+        format: "rfroutegraph-v1",
+        profile: "car",
+        nodes: 10,
+        edges: 20,
+        portals: { format: "rfrouteportals-v2", file: "portals.abc.bin", neighbors: {} }
+      }
     } }
   } } };
   const catalog = buildRoadCatalog({ regions: [region], state, config });
@@ -77,7 +83,12 @@ test("catalog exposes only durable indexes and the federated-region contract", (
   assert.equal(catalog.indexes.length, 1);
   assert.equal(catalog.indexes[0].base, "routes/car/quebec/");
   assert.deepEqual(catalog.indexes[0].neighbors, ["ontario"]);
-  assert.equal(catalog.indexes[0].portals, "portals.json");
+  assert.deepEqual(catalog.indexes[0].portals, {
+    format: "rfrouteportals-v2",
+    file: "portals.abc.bin",
+    neighbors: {}
+  });
+  assert.equal(catalog.portalFormat, "rfrouteportals-v2");
   state.regions.quebec.roadIndexes.car.uploadedFingerprint = "old";
   assert.equal(buildRoadCatalog({ regions: [region], state, config }).indexes.length, 0);
 });

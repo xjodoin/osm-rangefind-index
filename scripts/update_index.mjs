@@ -128,9 +128,10 @@ const RANGEFIND_BUILDER_VERSION = "0.4.13";
 // 0.4.15 streams serialization, 0.4.16 bounds SCC materialization, 0.4.17
 // streams large graph reads, 0.4.18 compacts overlay materialization, and
 // 0.4.19 bounds turn expansion and compacts SCC output in place. 0.4.20 adds
-// shared-OSM-id portal sidecars and therefore deliberately invalidates road
-// artifacts even though the regional rfroutegraph-v1 packs stay compatible.
-const RANGEFIND_ROAD_BUILDER_VERSION = "0.4.20";
+// shared-OSM-id portals. 0.4.21 makes them per-neighbor range blocks and
+// separates geometry packs for low-request rendering, deliberately
+// invalidating road artifacts while keeping rfroutegraph-v1 compatible.
+const RANGEFIND_ROAD_BUILDER_VERSION = "0.4.21";
 const WORK = join(projectRoot, "work");
 const OUT = join(WORK, "public/rangefind");
 const STATE_PATH = join(WORK, "state.json");

@@ -16,7 +16,7 @@
     },
     {
       "ref": "osm_rangefind_immutable_objects",
-      "description": "Cache content-addressed Rangefind objects for one year",
+      "description": "Cache content-addressed Rangefind index and route-portal range objects for one year",
       "expression": "(http.host eq \"osm.rangefind.dev\" and (ends_with(http.request.uri.path, \".bin\") or ends_with(http.request.uri.path, \".bin.gz\")))",
       "action": "set_cache_settings",
       "action_parameters": {

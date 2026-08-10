@@ -349,8 +349,9 @@ const trip = await roads.itinerary({
 ```
 
 `deploy/cloudflare-cache-rules.json` enables a one-year edge and browser TTL
-for content-addressed `.bin` and `.bin.gz` objects on `osm.rangefind.dev`.
-Those names include a content hash and are immutable. Mutable HTML,
+for content-addressed `.bin` and `.bin.gz` objects on `osm.rangefind.dev`,
+including `rfrouteportals-v2` per-neighbor range packs. Those names include a
+content hash and are immutable. Mutable HTML,
 `status.json`, manifests, `.json.gz` metadata, and the root manifest remain
 uncached so a newly published index becomes visible atomically. Create the
 zone cache ruleset with a token that has Cache Settings Edit access:
