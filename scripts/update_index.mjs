@@ -108,6 +108,7 @@ import {
 import {
   buildRoadCatalog,
   normalizeRoadIndexConfig,
+  planRoadObjectPrune,
   roadFederationNeighbors,
   roadIndexesCurrent,
   roadProfileIdentity
@@ -825,7 +826,7 @@ function roadSourceHeader(path) {
   throw new Error(`Road graph source has no bounded JSON header: ${path}`);
 }
 
-async function uploadRoadIndex(region, profile, store, prune) {
+async function uploadRoadIndex(region, profile, store) {
   const local = roadIndexDir(region, profile);
   const target = `routes/${profile}/${region.id}`;
   const publish = partitionPublishFiles(local);
@@ -834,19 +835,33 @@ async function uploadRoadIndex(region, profile, store, prune) {
   const result = await store.putFiles(content, target);
   await store.putFiles(publish.dependencyManifests, target);
   await store.putFiles(publish.rootManifests, target);
-  if (prune) {
-    const keep = new Set([
-      ...content,
-      ...publish.dependencyManifests,
-      ...publish.rootManifests
-    ].map(file => `${target}/${file.relative}`));
-    const stale = (await store.listObjects(`${target}/`))
-      .map(object => object.path)
-      .filter(path => !keep.has(path));
-    await store.deleteObjects(stale);
-    if (stale.length) log(`${region.id}/${profile}: pruned ${stale.length.toLocaleString()} superseded road object(s).`);
-  }
   log(`${region.id}/${profile}: uploaded ${result.files.toLocaleString()} immutable road file(s), ${(result.bytes / 1024 / 1024).toFixed(1)} MiB in ${Math.round((Date.now() - started) / 1000)}s.`);
+  return new Set([
+    ...content,
+    ...publish.dependencyManifests,
+    ...publish.rootManifests
+  ].map(file => `${target}/${file.relative}`));
+}
+
+async function pruneRoadIndex(region, profile, profileState, keep, store) {
+  const target = `routes/${profile}/${region.id}`;
+  const configuredDays = Number(process.env.ROAD_OBJECT_PRUNE_GRACE_DAYS || 7);
+  const graceDays = Number.isFinite(configuredDays) ? Math.max(1, configuredDays) : 7;
+  const planned = planRoadObjectPrune({
+    objects: await store.listObjects(`${target}/`),
+    keep,
+    previous: profileState.pruneCandidates || {},
+    now: new Date().toISOString(),
+    graceMs: graceDays * 86400_000
+  });
+  await store.deleteObjects(planned.eligible);
+  profileState.pruneCandidates = planned.candidates;
+  if (planned.eligible.length) {
+    log(`${region.id}/${profile}: pruned ${planned.eligible.length.toLocaleString()} road object(s) after ${graceDays}-day grace (${(planned.eligibleBytes / 1024 / 1024).toFixed(1)} MiB).`);
+  }
+  if (Object.keys(planned.candidates).length) {
+    log(`${region.id}/${profile}: deferred ${Object.keys(planned.candidates).length.toLocaleString()} superseded road object(s) for reader-safe cleanup (${(planned.pendingBytes / 1024 / 1024).toFixed(1)} MiB).`);
+  }
 }
 
 async function ensureRoadIndexes(region, state, options, store, args, remaining) {
@@ -949,9 +964,13 @@ async function ensureRoadIndexes(region, state, options, store, args, remaining)
       saveState(state);
     }
     if (args.upload) {
-      await uploadRoadIndex(region, profile, store, args.prune);
+      const keep = await uploadRoadIndex(region, profile, store);
       profileState.uploadedFingerprint = identity.fingerprint;
       saveState(state);
+      if (args.prune) {
+        await pruneRoadIndex(region, profile, profileState, keep, store);
+        saveState(state);
+      }
       if (!args.keepArtifacts) {
         rmSync(output, { recursive: true, force: true });
         rmSync(source, { force: true });

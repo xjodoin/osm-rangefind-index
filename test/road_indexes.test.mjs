@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   buildRoadCatalog,
   normalizeRoadIndexConfig,
+  planRoadObjectPrune,
   roadFederationNeighbors,
   roadBuildOptions,
   roadIndexesCurrent,
@@ -18,6 +19,41 @@ const region = {
   countryCodes: ["CA"],
   subdivisionCodes: ["CA-QC"]
 };
+
+test("road cleanup requires a continuously unreferenced grace period", () => {
+  const objects = [
+    { path: "routes/car/quebec/live.bin", size: 10 },
+    { path: "routes/car/quebec/old.bin", size: 20 }
+  ];
+  const keep = new Set(["routes/car/quebec/live.bin"]);
+  const first = planRoadObjectPrune({
+    objects,
+    keep,
+    now: "2026-08-01T00:00:00.000Z",
+    graceMs: 7 * 86400_000
+  });
+  assert.deepEqual(first.eligible, []);
+  assert.equal(first.candidates["routes/car/quebec/old.bin"].firstSeenAt, "2026-08-01T00:00:00.000Z");
+
+  const mature = planRoadObjectPrune({
+    objects,
+    keep,
+    previous: first.candidates,
+    now: "2026-08-08T00:00:00.000Z",
+    graceMs: 7 * 86400_000
+  });
+  assert.deepEqual(mature.eligible, ["routes/car/quebec/old.bin"]);
+  assert.deepEqual(mature.candidates, {});
+
+  const referencedAgain = planRoadObjectPrune({
+    objects,
+    keep: new Set(objects.map(object => object.path)),
+    previous: first.candidates,
+    now: "2026-08-08T00:00:00.000Z",
+    graceMs: 7 * 86400_000
+  });
+  assert.deepEqual(referencedAgain, { candidates: {}, eligible: [], pendingBytes: 0, eligibleBytes: 0 });
+});
 
 test("road index configuration is generic and shard count scales with source size", () => {
   assert.deepEqual(config.profiles, ["car"]);

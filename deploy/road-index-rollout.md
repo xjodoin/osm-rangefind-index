@@ -68,6 +68,11 @@ Expected results:
 - `status.json.roadIndexes.catalogEntries` grows throughout the rollout;
 - normal search continues serving its existing root throughout.
 
+`--prune` never removes a road object at the manifest flip. It records the
+superseded generation and removes it only after seven continuously
+unreferenced days, so clients holding the previous catalog cannot receive a
+404 while R2 still converges to a thin steady state.
+
 Run `npm run benchmark:roads` on the deployed checkout before starting the
 planet backfill if the Rangefind package or Node runtime changed. After two
 adjacent regions are published, run `npm run benchmark:roads:federated`; it

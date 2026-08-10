@@ -178,6 +178,38 @@ export function roadIndexesCurrent({ region, state, config, rangefindVersion, re
   });
 }
 
+/**
+ * Plan cleanup for one mutable regional route namespace. Upload age alone is
+ * unsafe: a browser can keep using the catalog it opened before a manifest
+ * flip. An object is eligible only after it stays unreferenced for the full
+ * grace period; an object referenced again leaves the candidate set.
+ */
+export function planRoadObjectPrune({ objects, keep, previous = {}, now, graceMs }) {
+  const candidates = {};
+  const eligible = [];
+  let pendingBytes = 0;
+  let eligibleBytes = 0;
+  const nowMs = Date.parse(now);
+  for (const object of objects) {
+    if (keep.has(object.path)) continue;
+    const known = previous[object.path];
+    const candidate = {
+      firstSeenAt: known?.firstSeenAt || now,
+      lastSeenAt: now,
+      size: Number(object.size || 0)
+    };
+    const age = nowMs - Date.parse(candidate.firstSeenAt);
+    if (Number.isFinite(age) && age >= graceMs) {
+      eligible.push(object.path);
+      eligibleBytes += candidate.size;
+    } else {
+      candidates[object.path] = candidate;
+      pendingBytes += candidate.size;
+    }
+  }
+  return { candidates, eligible, pendingBytes, eligibleBytes };
+}
+
 export function buildRoadCatalog({ regions, state, config, requireUploaded = true }) {
   const indexes = [];
   if (config.enabled) {

@@ -286,8 +286,11 @@ Publish ordering is reader-safe: shard packs upload before generation
 manifests, stable shard manifests publish last, and the root manifest uploads
 only after every built shard is fully durable.
 Old packs are left in place until a `--prune` run so in-flight readers on the
-previous manifest never 404 (prune runs only on freshly rebuilt shards whose
-local mirror is complete).
+previous manifest never 404. Regional road namespaces go one step further:
+`--prune` records superseded objects and deletes them only after they remain
+continuously unreferenced for seven days (`ROAD_OBJECT_PRUNE_GRACE_DAYS` can
+raise that window). This keeps R2 thin without breaking a catalog or graph
+that a long-lived client opened before the manifest flip.
 
 `scripts/r2_gc.sh` handles leftovers after local shard cleanup. It takes the
 same launcher lock as the indexer, marks immutable objects referenced by the
