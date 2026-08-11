@@ -80,6 +80,11 @@ test("road identities invalidate extraction and builds on their real inputs", ()
   assert.notEqual(after.sourceFingerprint, federated.sourceFingerprint, "portal topology invalidates extraction");
   state.regions.quebec.roadIndexes = { car: { builtFingerprint: after.fingerprint, uploadedFingerprint: after.fingerprint } };
   assert.equal(roadIndexesCurrent({ region, state, config, rangefindVersion: "0.4.11", requireUploaded: true }), true);
+  assert.equal(
+    roadIndexesCurrent({ region, state, config, rangefindVersion: "0.5.0", requireUploaded: true }),
+    false,
+    "a route codec/semantics release invalidates a graph built by an older road builder"
+  );
 });
 
 test("federation neighbor candidates handle shared boundaries without claiming connectivity", () => {

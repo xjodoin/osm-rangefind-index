@@ -137,7 +137,10 @@ const RANGEFIND_BUILDER_VERSION = "0.4.13";
 // shared-OSM-id portals. 0.4.21 makes them per-neighbor range blocks and
 // separates geometry packs for low-request rendering, deliberately
 // invalidating road artifacts while keeping rfroutegraph-v1 compatible.
-const RANGEFIND_ROAD_BUILDER_VERSION = "0.4.21";
+// 0.5.0 adds vehicle/lane access flags and road numbering schemes, and bumps
+// the route root/cell codecs; old graphs remain readable but must be rebuilt
+// to expose the new semantics.
+const RANGEFIND_ROAD_BUILDER_VERSION = "0.5.0";
 const WORK = join(projectRoot, "work");
 const OUT = join(WORK, "public/rangefind");
 const STATE_PATH = join(WORK, "state.json");
