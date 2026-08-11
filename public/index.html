@@ -7,6 +7,7 @@
   <title>Rangefind OpenStreetMap Index</title>
   <meta name="theme-color" content="#14161d">
   <link rel="canonical" href="https://osm.rangefind.dev/">
+  <link rel="service-desc" href=".well-known/rangefind.json" type="application/json">
   <link rel="icon" href="https://rangefind.dev/assets/favicon.svg" type="image/svg+xml">
   <link rel="preload" href="https://rangefind.dev/assets/fonts/bricolage-grotesque-400-800-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="preload" href="https://rangefind.dev/assets/fonts/martian-mono-400-latin.woff2" as="font" type="font/woff2" crossorigin>
@@ -293,6 +294,7 @@ const result = await search.search({
         <p>Manifests stay fresh while content-addressed index packs are cached at Cloudflare's edge.</p>
         <div class="links">
           <a href="manifest.min.json"><span>Compact manifest</span><code>manifest.min.json</code></a>
+          <a href=".well-known/rangefind.json"><span>Service discovery</span><code>.well-known/rangefind.json</code></a>
           <a href="manifest.json"><span>Full manifest</span><code>manifest.json</code></a>
           <a href="status.json"><span>Indexer status</span><code>status.json</code></a>
           <a href="routes/catalog.json"><span>Route catalog</span><code>routes/catalog.json</code></a>

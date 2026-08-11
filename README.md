@@ -103,11 +103,17 @@ empty shards.
 
 Each durable graph is discoverable through `routes/catalog.json`. A catalog
 entry contains its region bbox and ISO metadata, profile, base URL, source
-vintage, and route manifest. All itinerary stops must belong to the same
-regional graph. This is an honest boundary: independently clipped Geofabrik
-extracts cannot provide exact cross-border connectivity. A future planet
-graph builder can replace the catalog policy without changing any regional
-index format.
+vintage, route manifest, and exact shared-OSM-node portals to neighboring
+regions. The catalog engine opens regional graphs lazily and crosses borders
+only where both graphs prove the same OSM node and coordinate; it never
+invents a connection from bbox overlap or proximity.
+
+Clients that do not know which capabilities a deployment provides can start
+at `/.well-known/rangefind.json`. The descriptor identifies the search
+manifest, route catalog, status endpoint, supported travel profiles, and each
+format explicitly. The search root also embeds the same relative paths in its
+`endpoints` field. Route graphs use `manifest.json` below each catalog entry's
+`base`; they are not place shards and do not use `manifest.min.json`.
 
 The route lane is incremental and resumable at region/profile boundaries:
 
@@ -331,8 +337,24 @@ await engine.search({ q: "1234 rue sainte-catherine", size: 5 });
 await engine.search({ q: "", geo: { near: { lat: 45.5, lon: -73.6 }, sort: "distance" } });
 ```
 
-For a route or optimized multi-stop itinerary, select a catalog entry whose
-bbox contains every stop and open its regional graph directly:
+For generic same-region or cross-region routing, open the advertised catalog;
+regional graphs and portal ranges are fetched lazily:
+
+```js
+import { openRouteCatalogUrl } from "rangefind/route";
+
+const roads = await openRouteCatalogUrl(
+  "https://osm.rangefind.dev/routes/catalog.json",
+  { profile: "car" }
+);
+const trip = await roads.route({
+  from: { lat: 45.5019, lon: -73.5674 },
+  to: { lat: 43.6532, lon: -79.3832 }
+});
+```
+
+For a multi-stop itinerary known to remain in one region, select the catalog
+entry whose bbox contains every stop and open that graph directly:
 
 ```js
 import { openRouteGraphUrl } from "rangefind/route";

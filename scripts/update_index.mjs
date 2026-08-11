@@ -70,6 +70,11 @@ import { createR2Store, listLocalFiles } from "./lib/r2_store.mjs";
 import { acquireProcessLock } from "./lib/process_lock.mjs";
 import { appendStaleObjectPaths } from "./lib/root_artifacts.mjs";
 import {
+  buildDiscoveryDocument,
+  DISCOVERY_PATH,
+  rootDiscoveryEndpoints
+} from "./lib/discovery.mjs";
+import {
   ROOT_ROUTING_ARTIFACTS,
   rootRoutingArtifactIsPublished
 } from "./lib/root_publish.mjs";
@@ -1811,8 +1816,10 @@ function statusSnapshot(regions, state, roadConfig = { enabled: false, profiles:
 
 function writeStatusArtifacts(regions, state, roadConfig) {
   mkdirSync(OUT, { recursive: true });
+  mkdirSync(dirname(join(OUT, DISCOVERY_PATH)), { recursive: true });
   writeFileSync(join(OUT, "index.html"), readFileSync(join(projectRoot, "public/index.html")));
   writeFileSync(join(OUT, "status.json"), `${JSON.stringify(statusSnapshot(regions, state, roadConfig), null, 2)}\n`);
+  writeFileSync(join(OUT, DISCOVERY_PATH), `${JSON.stringify(buildDiscoveryDocument(roadConfig), null, 2)}\n`);
 }
 
 let statusUploadTail = Promise.resolve();
@@ -1828,7 +1835,7 @@ function startStatusUpload(store) {
       statusUploadRequested = false;
       const includePage = statusPageRequested;
       statusPageRequested = false;
-      const names = includePage ? ["index.html", "status.json"] : ["status.json"];
+      const names = includePage ? ["index.html", "status.json", DISCOVERY_PATH] : ["status.json"];
       try {
         for (const name of names) await store.putFile(join(OUT, name), name);
       } catch (error) {
@@ -2469,6 +2476,7 @@ async function main() {
     suggestRouting,
     extra: {
       ...(categoryLexicon ? { category_lexicon: categoryLexicon } : {}),
+      endpoints: rootDiscoveryEndpoints(options.roadIndexes),
       // Root-level provenance: the OSM attribution block without any
       // region-specific fields; per-shard manifests carry source URLs and
       // data versions.
