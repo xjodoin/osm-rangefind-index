@@ -332,11 +332,22 @@ const result = await search.search({
 
   <script>
     const number = new Intl.NumberFormat();
+    const compactNumber = new Intl.NumberFormat(undefined, {
+      notation: "compact",
+      maximumFractionDigits: 1
+    });
     const shortDate = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" });
     const dateTime = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
 
     function setText(id, value) {
       document.getElementById(id).textContent = value;
+    }
+
+    function setMetric(id, value, exactValue = value) {
+      const element = document.getElementById(id);
+      element.textContent = value;
+      element.title = exactValue;
+      element.setAttribute("aria-label", exactValue);
     }
 
     function formatDate(value, includeTime = false) {
@@ -356,10 +367,21 @@ const result = await search.search({
       setText("acquired-detail", `${index.acquisitionPercent}% of regional corpora`);
       setText("published", `${number.format(index.publishedShards)} / ${number.format(index.totalRegions)}`);
       setText("published-detail", `${index.publicationPercent}% of target shards`);
-      setText("documents", number.format(index.publishedDocuments));
-      setText("roads", roadIndexes?.enabled
-        ? `${number.format(roadIndexes.catalogEntries)} / ${number.format(roadIndexes.total)}`
-        : "Disabled");
+      setMetric(
+        "documents",
+        compactNumber.format(index.publishedDocuments),
+        `${number.format(index.publishedDocuments)} documents live`
+      );
+      const roadCount = roadIndexes?.enabled
+        ? `${number.format(roadIndexes.catalogEntries)}/${number.format(roadIndexes.total)}`
+        : "Disabled";
+      setMetric(
+        "roads",
+        roadCount,
+        roadIndexes?.enabled
+          ? `${number.format(roadIndexes.catalogEntries)} of ${number.format(roadIndexes.total)} road graphs`
+          : roadCount
+      );
       setText("roads-detail", roadIndexes?.enabled
         ? `${number.format(roadIndexes.uploaded)} uploaded · ${number.format(roadIndexes.unavailable)} unavailable`
         : "regional itinerary indexes");
