@@ -84,20 +84,34 @@ throughput with deterministic synthetic country/subdivision overlap. Use
 specific host or source profile.
 
 The normal updater runs downloads, isolated OSM place-extraction workers,
-regional road builders, and direct R2 uploads as a bounded pipeline. Weighted
-capacity permits small regions to overlap while country-scale road graphs
-reserve most lanes. Before starting a new CPU-heavy stage, Linux hosts check
-available memory and memory PSI; active work is never killed merely to admit
-more concurrency. Configure the hard lane count with `acquisitionConcurrency`,
-the number of regions allowed to flow between stages with
-`acquisitionPipelineWorkers`, and optional pressure thresholds with
-`INDEX_PIPELINE_MIN_AVAILABLE_GIB` and `INDEX_PIPELINE_MAX_MEMORY_PSI`.
+isolated address-enrichment workers, regional road builders, and direct R2
+uploads as a bounded pipeline. Once the shared OSM place corpus exists,
+address enrichment and road construction for that region run independently,
+so a large OpenAddresses partition no longer delays the start of its route
+graphs. Weighted capacity uses PBF size plus address-partition bytes and record
+count: small regions overlap while country-scale enrichment and road graphs
+reserve additional lanes. Before starting a new CPU-heavy stage, Linux hosts
+check available memory and memory PSI; active work is never killed merely to
+admit more concurrency. Configure the hard lane count with
+`acquisitionConcurrency`, the number of regions allowed to flow between stages
+with `acquisitionPipelineWorkers`, optional worker heaps with
+`OSM_EXTRACT_HEAP_MB` and `ADDRESS_ENRICHMENT_HEAP_MB`, and pressure thresholds
+with `INDEX_PIPELINE_MIN_AVAILABLE_GIB` and `INDEX_PIPELINE_MAX_MEMORY_PSI`.
+Every stage logs its queue delay, elapsed time, weight, and active lane count.
+Disk reservations remain held through corpus compression, source deletion, and
+scratch cleanup. A region that cannot fit waits for active cleanup leases to
+release capacity instead of aborting the planet run; if no active lease can
+free space, the updater still fails closed. `INDEX_DISK_ADMISSION_POLL_MS`
+controls the wait probe interval.
 Completed regional road graphs publish through a serialized catalog lane, so
 they become discoverable immediately without mutable-catalog races.
 
-Run `npm run benchmark:acquisition` for a real-PBF comparison of sequential
-versus isolated parallel place extraction. It downloads Liechtenstein and
-Luxembourg into a temporary directory and removes all artifacts afterward.
+Run `npm run benchmark:acquisition` for real-PBF comparisons of sequential
+versus isolated parallel place extraction and sequential versus overlapping
+address enrichment/road extraction. It downloads Liechtenstein and Luxembourg,
+generates a deterministic address workload, uses the production workers, and
+removes all artifacts afterward. Set `ACQUISITION_BENCH_ADDRESS_ROWS` to scale
+the enrichment half of the benchmark.
 
 ## Road indexes and itinerary planning
 
@@ -182,12 +196,13 @@ snapshots and resume building before checking Geofabrik again. Daily upstream
 refreshes start only after every initial shard has been published, so fresh
 source files cannot starve the first complete index.
 
-Acquisition uses `acquisitionConcurrency` lanes (default `2` in the shipped
-configuration), so downloads and normal-sized extracts can overlap. A PBF at
-or above `largePbfBytes` (default 1 GiB) consumes every lane and extracts
-alone to protect memory on the 31 GiB production host. Stats and shard builds
-remain sequential; each shard build already uses the configured CPU worker
-pool. `partitionReducerWorkers` is capped separately (default `8`) to saturate
+Acquisition uses `acquisitionConcurrency` weighted lanes, so downloads and
+normal-sized stages can overlap. With four lanes, an ordinary road builder
+uses two, a PBF at or above `largePbfBytes` (default 1 GiB) uses three, and a
+large address partition uses two. This leaves useful overlap without admitting
+two country-scale road graphs at once on the 31 GiB production host. Stats and
+shard builds remain sequential; each shard build already uses the configured
+CPU worker pool. `partitionReducerWorkers` is capped separately (default `8`) to saturate
 continent-scale reduction without tying it to scan parallelism. The shipped
 `codeStoreWorkerPreloadMaxBytes` is 3 GiB so large OSM filter stores use one
 shared sequential preload instead of per-worker random reads. Rangefind's OSM
@@ -336,7 +351,7 @@ the PBF, road source/index, and extractor caches are deleted, the corpus JSONL i
 index copy is gutted to manifests + generation id-maps (what future deltas
 need). Steady state per region ≈ the gzipped corpus — e.g. Luxembourg
 ~17 MB on disk vs a 186 MB published index. Transient acquisition is bounded
-by `acquisitionConcurrency` normal regions or one large region. Shards still
+by weighted stage capacity and per-region disk reservations. Shards still
 build one at a time, while `R2_UPLOAD_LANES` shard uploads run concurrently
 and up to `R2_UPLOAD_QUEUE_DEPTH` completed shards can await cleanup. Size disk
 for the largest active build plus that bounded queue rather than the full corpus.

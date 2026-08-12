@@ -51,9 +51,25 @@ export async function waitForSystemHeadroom({
   }
 }
 
-export function pipelineStageWeight({ stage, sourceBytes, largePbfBytes, capacity }) {
+export function pipelineStageWeight({
+  stage,
+  sourceBytes,
+  largePbfBytes,
+  capacity,
+  addressBytes = 0,
+  addressRecords = 0
+}) {
   const total = Math.max(1, Math.floor(number(capacity, 1)));
   const large = Number(sourceBytes || 0) >= Number(largePbfBytes || Infinity);
+  if (stage === "enrichment") {
+    // Compressed address partitions are a better predictor than PBF size for
+    // enrichment: they expand into synchronous normalization + SQLite work.
+    // Reserve half of a four-lane host for a country-scale source, leaving the
+    // other half available for one ordinary road build.
+    const addressHeavy = Number(addressBytes || 0) >= Number(largePbfBytes || Infinity)
+      || Number(addressRecords || 0) >= 5_000_000;
+    return addressHeavy ? Math.max(1, Math.ceil(total / 2)) : 1;
+  }
   if (stage === "roads") {
     // Even a sub-GiB PBF can expand into a multi-GiB turn graph. Permit at
     // most two ordinary road builders on a 4-lane host; a large one reserves
@@ -67,13 +83,16 @@ export function pipelineStageWeight({ stage, sourceBytes, largePbfBytes, capacit
   return Math.min(2, total);
 }
 
-export function createAdaptiveStageLimiter({ capacity, beforeStart = null } = {}) {
+export function createAdaptiveStageLimiter({ capacity, beforeStart = null, onChange = null } = {}) {
   if (!Number.isInteger(capacity) || capacity < 1) {
     throw new TypeError("capacity must be a positive integer");
   }
   let used = 0;
   let pumping = false;
   const waiting = [];
+  const notify = event => {
+    try { onChange?.(event); } catch { /* telemetry must never affect scheduling */ }
+  };
 
   const pump = async () => {
     if (pumping) return;
@@ -95,11 +114,30 @@ export function createAdaptiveStageLimiter({ capacity, beforeStart = null } = {}
         }
         waiting.splice(index, 1);
         used += next.weight;
+        const startedAt = performance.now();
+        notify({
+          type: "start",
+          capacity,
+          used,
+          pending: waiting.length,
+          weight: next.weight,
+          meta: next.meta,
+          queuedMs: Math.round(startedAt - next.queuedAt)
+        });
         void Promise.resolve()
           .then(next.task)
           .then(next.resolve, next.reject)
           .finally(() => {
             used -= next.weight;
+            notify({
+              type: "finish",
+              capacity,
+              used,
+              pending: waiting.length,
+              weight: next.weight,
+              meta: next.meta,
+              elapsedMs: Math.round(performance.now() - startedAt)
+            });
             void pump();
           });
       }
@@ -116,7 +154,7 @@ export function createAdaptiveStageLimiter({ capacity, beforeStart = null } = {}
       if (typeof task !== "function") throw new TypeError("task must be a function");
       const weight = Math.max(1, Math.min(capacity, Math.floor(number(requestedWeight, 1))));
       return new Promise((resolveDone, rejectDone) => {
-        waiting.push({ weight, task, meta, resolve: resolveDone, reject: rejectDone });
+        waiting.push({ weight, task, meta, resolve: resolveDone, reject: rejectDone, queuedAt: performance.now() });
         void pump();
       });
     },

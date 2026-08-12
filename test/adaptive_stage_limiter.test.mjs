@@ -36,6 +36,13 @@ test("weights large road work more heavily than place extraction", () => {
   assert.equal(pipelineStageWeight({ ...common, stage: "roads", sourceBytes: 10 }), 2);
 });
 
+test("weights enrichment by its address partition instead of only PBF size", () => {
+  const common = { stage: "enrichment", sourceBytes: 10, largePbfBytes: 1_000, capacity: 4 };
+  assert.equal(pipelineStageWeight({ ...common, addressBytes: 100, addressRecords: 100 }), 1);
+  assert.equal(pipelineStageWeight({ ...common, addressBytes: 2_000, addressRecords: 100 }), 2);
+  assert.equal(pipelineStageWeight({ ...common, addressBytes: 100, addressRecords: 5_000_000 }), 2);
+});
+
 test("runs real stages concurrently within weighted capacity", async () => {
   const limiter = createAdaptiveStageLimiter({ capacity: 4 });
   const first = deferred();
@@ -65,6 +72,30 @@ test("uses a free lane behind a temporarily blocked heavy stage", async () => {
   active.resolve();
   await Promise.all([a, blocked, fitting]);
   assert.deepEqual(events, ["active", "fitting", "heavy"]);
+});
+
+test("reports bounded active weight and elapsed stage telemetry", async () => {
+  const events = [];
+  const limiter = createAdaptiveStageLimiter({ capacity: 3, onChange: event => events.push(event) });
+  await Promise.all([
+    limiter.run(2, async () => {}, { region: "a", stage: "roads" }),
+    limiter.run(1, async () => {}, { region: "b", stage: "enrichment" })
+  ]);
+  assert.equal(events.filter(event => event.type === "start").length, 2);
+  assert.equal(events.every(event => event.used >= 0 && event.used <= event.capacity), true);
+  assert.equal(events.some(event => event.type === "finish" && Number.isFinite(event.elapsedMs)), true);
+});
+
+test("telemetry failures cannot wedge or fail scheduled work", async () => {
+  const limiter = createAdaptiveStageLimiter({
+    capacity: 1,
+    onChange() { throw new Error("telemetry unavailable"); }
+  });
+  let ran = false;
+  await limiter.run(1, async () => { ran = true; });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ran, true);
+  assert.equal(limiter.used, 0);
 });
 
 test("rejects one stage when its pressure probe fails and continues", async () => {
