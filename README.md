@@ -83,6 +83,22 @@ throughput with deterministic synthetic country/subdivision overlap. Use
 `-- --jobs N --rows-per-job N --parallelism N --network-delay-ms N` to model a
 specific host or source profile.
 
+The normal updater runs downloads, isolated OSM place-extraction workers,
+regional road builders, and direct R2 uploads as a bounded pipeline. Weighted
+capacity permits small regions to overlap while country-scale road graphs
+reserve most lanes. Before starting a new CPU-heavy stage, Linux hosts check
+available memory and memory PSI; active work is never killed merely to admit
+more concurrency. Configure the hard lane count with `acquisitionConcurrency`,
+the number of regions allowed to flow between stages with
+`acquisitionPipelineWorkers`, and optional pressure thresholds with
+`INDEX_PIPELINE_MIN_AVAILABLE_GIB` and `INDEX_PIPELINE_MAX_MEMORY_PSI`.
+Completed regional road graphs publish through a serialized catalog lane, so
+they become discoverable immediately without mutable-catalog races.
+
+Run `npm run benchmark:acquisition` for a real-PBF comparison of sequential
+versus isolated parallel place extraction. It downloads Liechtenstein and
+Luxembourg into a temporary directory and removes all artifacts afterward.
+
 ## Road indexes and itinerary planning
 
 `roadIndexes` in `regions.json` enables Rangefind's `rfroutegraph-v1` lane.

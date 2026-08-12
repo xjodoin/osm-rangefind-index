@@ -65,8 +65,13 @@ import { writeShardedRootManifest } from "rangefind/shards";
 import * as rangefindShards from "rangefind/shards";
 import { readConfig } from "rangefind/config";
 import * as rangefindOsmNode from "rangefind/osm/node";
-import { extractOsmPlaces } from "rangefind/osm/extract";
 import { createR2Store, listLocalFiles } from "./lib/r2_store.mjs";
+import {
+  createAdaptiveStageLimiter,
+  pipelineStageWeight,
+  systemHeadroom,
+  waitForSystemHeadroom
+} from "./lib/adaptive_stage_limiter.mjs";
 import { acquireProcessLock } from "./lib/process_lock.mjs";
 import { appendStaleObjectPaths } from "./lib/root_artifacts.mjs";
 import {
@@ -148,6 +153,7 @@ const LOCK_PATH = join(WORK, ".lock");
 const STATS_DIR = join(WORK, "scoring-stats");
 const CORPUS_DELTA_WORKER = join(projectRoot, "scripts/compute_delta_worker.mjs");
 const ROAD_INDEX_WORKER = join(projectRoot, "scripts/road_index_worker.mjs");
+const OSM_EXTRACT_WORKER = join(projectRoot, "scripts/osm_extract_worker.mjs");
 const SOURCE_REQUEST_TIMEOUT_MS = Math.max(
   1_000,
   Number(process.env.SOURCE_REQUEST_TIMEOUT_MS || 30_000)
@@ -306,7 +312,11 @@ function loadRegions(args) {
     codeStoreWorkerPreloadMaxBytes: Number.isFinite(Number(config.codeStoreWorkerPreloadMaxBytes))
       ? Math.max(0, Number(config.codeStoreWorkerPreloadMaxBytes))
       : 3 * 1024 ** 3,
-    acquisitionConcurrency: Math.max(1, Math.min(4, Number(config.acquisitionConcurrency || 1))),
+    acquisitionConcurrency: Math.max(1, Math.min(8, Number(config.acquisitionConcurrency || 1))),
+    acquisitionPipelineWorkers: Math.max(1, Math.min(
+      16,
+      Number(config.acquisitionPipelineWorkers || (Number(config.acquisitionConcurrency || 1) + 2))
+    )),
     largePbfBytes: Math.max(1, Number(config.largePbfBytes || 1024 ** 3)),
     roadIndexes: args.roadIndexes
       ? normalizeRoadIndexConfig(config.roadIndexes)
@@ -741,12 +751,17 @@ async function extractJsonl(region, state) {
     && existsSync(regionOsmCorpusInput(region))
     && Number(priorOsmMeta?.pbfBytes) === pbf.size
     && Math.floor(Number(priorOsmMeta?.pbfMtimeMs)) === Math.floor(pbf.mtimeMs);
-  const osmMeta = reusableOsm ? priorOsmMeta : await extractOsmPlaces({
-    region: region.id,
-    pbf: region.pbf,
-    root: regionWorkRoot(region),
-    rqa: false
-  });
+  const osmMeta = reusableOsm ? priorOsmMeta : await runIpcWorker(
+    OSM_EXTRACT_WORKER,
+    [writeWorkerConfig(`osm-extract-${region.id}`, {
+      region: region.id,
+      pbf: region.pbf,
+      root: regionWorkRoot(region),
+      rqa: false
+    })],
+    Math.max(2048, Math.min(16384, Number(process.env.OSM_EXTRACT_HEAP_MB || 8192) || 8192)),
+    `osm extract ${region.id}`
+  );
   if (reusableOsm && regionOsmCorpusInput(region).endsWith(".gz")) {
     log(`${region.id}: reusing compressed OSM base corpus`);
   }
@@ -1404,7 +1419,14 @@ function suggestSetPath(region) {
   return join(SUGGEST_SETS_DIR, `${region.id.replaceAll("/", "-")}.suggest.gz`);
 }
 
-function runIpcWorker(worker, args, heapMb) {
+function writeWorkerConfig(name, value) {
+  const path = join(WORK, "configs", `${name}.json`);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+  return path;
+}
+
+function runIpcWorker(worker, args, heapMb, label = "worker") {
   return new Promise((resolveDone, rejectDone) => {
     let result;
     const child = fork(worker, args, {
@@ -1417,7 +1439,7 @@ function runIpcWorker(worker, args, heapMb) {
     child.on("error", rejectDone);
     child.on("exit", (code, signal) => {
       if (code === 0 && result) resolveDone(result);
-      else rejectDone(new Error(`text routing worker failed (${signal || `exit ${code}`})`));
+      else rejectDone(new Error(`${label} failed (${signal || `exit ${code}`})`));
     });
   });
 }
@@ -2148,15 +2170,49 @@ async function main() {
     const publishedCount = regions.filter(region => published.has(region.id)).length;
     log(`Bootstrap build-first: ${builtCount}/${regions.length} built, ${publishedCount}/${regions.length} published — skipping upstream refresh.`);
   } else {
-    // Downloads may overlap with extraction; normal extracts share the
-    // configured lanes, while a large PBF takes every lane so two
-    // memory-heavy regions can never overlap.
+    // Downloads, isolated place extraction, road builds, and uploads flow
+    // independently. Weighted lanes keep large stages from colliding while
+    // leaving capacity for useful work from another region.
     const acquisitionConcurrency = Math.min(options.acquisitionConcurrency, regions.length);
-    const withExtractionCapacity = createWeightedLimiter(acquisitionConcurrency);
+    const acquisitionWorkers = Math.min(
+      Math.max(acquisitionConcurrency, options.acquisitionPipelineWorkers),
+      regions.length
+    );
+    const withDownloadCapacity = createWeightedLimiter(acquisitionConcurrency);
+    const minPipelineAvailableBytes = Math.max(
+      1,
+      Number(process.env.INDEX_PIPELINE_MIN_AVAILABLE_GIB || 6)
+    ) * 1024 ** 3;
+    const maxPipelineMemoryPsi = Math.max(
+      0,
+      Number(process.env.INDEX_PIPELINE_MAX_MEMORY_PSI || 2)
+    );
+    const stageLimiter = createAdaptiveStageLimiter({
+      capacity: acquisitionConcurrency,
+      beforeStart: ({ region, stage }) => waitForSystemHeadroom({
+        sample: () => systemHeadroom({
+          minAvailableBytes: minPipelineAvailableBytes,
+          maxMemoryPsiAvg10: maxPipelineMemoryPsi
+        }),
+        onPressure: pressure => log(
+          `${region}/${stage}: waiting for system headroom (`
+          + `${pressure.availableBytes == null ? "unknown" : `${(pressure.availableBytes / 1024 ** 3).toFixed(1)} GiB available`}, `
+          + `memory PSI ${pressure.memoryPsiAvg10 ?? "unknown"})`
+        )
+      })
+    });
     const activeRegions = new Set();
     let acquisitionHalted = false;
     let acquisitionHaltReason = null;
     let reservedExtractionBytes = 0;
+    let acquisitionCatalogPublishTail = Promise.resolve();
+    const publishAcquisitionCatalog = () => {
+      const publication = acquisitionCatalogPublishTail.then(() => (
+        publishRoadCatalog(allRegions, state, options, store, args.upload)
+      ));
+      acquisitionCatalogPublishTail = publication.catch(() => {});
+      return publication;
+    };
     const completedRegionIds = new Set(acquisitionSession.completedRegionIds.filter(id => {
       const region = regions.find(candidate => candidate.id === id);
       return region && hasCorpus(region);
@@ -2176,7 +2232,12 @@ async function main() {
         failed: Object.keys(acquisitionSession.failures).length
       }
     );
-    log(`Acquisition concurrency: ${acquisitionConcurrency} lane(s); PBFs >= ${(options.largePbfBytes / 1024 / 1024 / 1024).toFixed(1)} GiB run exclusively.`);
+    log(
+      `Adaptive acquisition pipeline: ${acquisitionWorkers} region worker(s), `
+      + `${acquisitionConcurrency} weighted stage lane(s); large PBF place/road weights `
+      + `${pipelineStageWeight({ stage: "places", sourceBytes: options.largePbfBytes, largePbfBytes: options.largePbfBytes, capacity: acquisitionConcurrency })}/`
+      + `${pipelineStageWeight({ stage: "roads", sourceBytes: options.largePbfBytes, largePbfBytes: options.largePbfBytes, capacity: acquisitionConcurrency })}.`
+    );
     let pending = regions.filter(region => !completedRegionIds.has(region.id));
     let finalFailures = [];
     for (let attempt = 1; pending.length && attempt <= ACQUISITION_MAX_ATTEMPTS; attempt++) {
@@ -2203,29 +2264,47 @@ async function main() {
             // partition for a one-shard operation.
             await prepareRegionAddressSources(region, allRegions, { reuseCached: resumedAcquisition });
             const recovered = recoverCompletedEnrichedCorpus(region, state);
-            const source = await refreshPbf(region, state, {
+            const source = await withDownloadCapacity(1, () => refreshPbf(region, state, {
               roadIndexes: options.roadIndexes,
               requireRoadUpload: args.upload
-            });
+            }));
             const large = source.bytes >= options.largePbfBytes;
             if (large) {
-              log(`${region.id}: large PBF (${(source.bytes / 1024 / 1024 / 1024).toFixed(1)} GiB) — extracting exclusively`);
+              log(`${region.id}: large PBF (${(source.bytes / 1024 / 1024 / 1024).toFixed(1)} GiB) — using weighted pipeline capacity`);
             }
-            const extracted = await withExtractionCapacity(
-              large ? acquisitionConcurrency : 1,
-              async () => {
-                ensureDiskHeadroom(region, options, source.bytes, reservedExtractionBytes);
-                const reservation = diskWorkingBytes(region, source.bytes);
-                reservedExtractionBytes += reservation;
-                try {
-                  const placeCorpusChanged = await extractJsonl(region, state);
-                  await ensureRoadIndexes(region, state, options, store, args, remaining);
-                  return placeCorpusChanged;
-                } finally {
-                  reservedExtractionBytes -= reservation;
-                }
-              }
-            );
+            ensureDiskHeadroom(region, options, source.bytes, reservedExtractionBytes);
+            const reservation = diskWorkingBytes(region, source.bytes);
+            reservedExtractionBytes += reservation;
+            let extracted;
+            try {
+              extracted = await stageLimiter.run(
+                pipelineStageWeight({
+                  stage: "places",
+                  sourceBytes: source.bytes,
+                  largePbfBytes: options.largePbfBytes,
+                  capacity: acquisitionConcurrency
+                }),
+                () => extractJsonl(region, state),
+                { region: region.id, stage: "places" }
+              );
+              await stageLimiter.run(
+                pipelineStageWeight({
+                  stage: "roads",
+                  sourceBytes: source.bytes,
+                  largePbfBytes: options.largePbfBytes,
+                  capacity: acquisitionConcurrency
+                }),
+                () => ensureRoadIndexes(region, state, options, store, args, remaining),
+                { region: region.id, stage: "roads" }
+              );
+              // Region workers finish out of order. Serialize mutable catalog
+              // flips and rebuild each snapshot from current durable state so
+              // every completed graph becomes live without an older snapshot
+              // racing over a newer one.
+              await publishAcquisitionCatalog();
+            } finally {
+              reservedExtractionBytes -= reservation;
+            }
             if (extracted || recovered) {
               log(`${region.id}: corpus refreshed (${(state.regions[region.id].docs || 0).toLocaleString()} docs)`);
               const builtBuilderVersion = previouslyBuiltBuilderVersion(state.regions[region.id]);
@@ -2266,8 +2345,8 @@ async function main() {
           }
         }
       };
-      await Promise.all(Array.from({ length: acquisitionConcurrency }, () => acquireRegions()));
-      await publishRoadCatalog(allRegions, state, options, store, args.upload);
+      await Promise.all(Array.from({ length: acquisitionWorkers }, () => acquireRegions()));
+      await publishAcquisitionCatalog();
       finalFailures = failures;
       pending = failures.map(failure => failure.region);
     }

@@ -10,6 +10,7 @@
   "scripts": {
     "test": "node --test",
     "benchmark:addresses": "node scripts/benchmark_address_partition.mjs",
+    "benchmark:acquisition": "node scripts/benchmark_acquisition_pipeline.mjs",
     "benchmark:roads": "node scripts/benchmark_road_index.mjs",
     "benchmark:roads:federated": "node scripts/benchmark_federated_road_index.mjs",
     "update": "node scripts/update_index.mjs",

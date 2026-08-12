@@ -5271,7 +5271,8 @@
   "workerCount": 0,
   "partitionReducerWorkers": 8,
   "codeStoreWorkerPreloadMaxBytes": 3221225472,
-  "acquisitionConcurrency": 2,
+  "acquisitionConcurrency": 4,
+  "acquisitionPipelineWorkers": 6,
   "largePbfBytes": 1073741824,
   "roadIndexes": {
     "enabled": true,
