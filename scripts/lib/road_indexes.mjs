@@ -8,6 +8,10 @@ export const ROAD_PIPELINE_SCHEMA = 3;
 
 const SUPPORTED_PROFILES = new Set(["car", "bike", "foot"]);
 
+export function roadIndexesEnabledForRegion(region) {
+  return region?.roadIndexes !== false;
+}
+
 function positiveInteger(value, fallback, minimum = 1) {
   const number = Number(value);
   return Number.isFinite(number) && number >= minimum ? Math.floor(number) : fallback;
@@ -94,12 +98,13 @@ function bboxArea(bbox) {
  * the authoritative adjacency check. The small margin tolerates independently
  * rounded upstream coverage polygons without inventing a road connection. */
 export function roadFederationNeighbors(regions, marginDegrees = 0.02) {
-  const result = new Map(regions.map(region => [region.id, []]));
-  for (let left = 0; left < regions.length; left++) {
-    const a = regions[left];
+  const routable = regions.filter(roadIndexesEnabledForRegion);
+  const result = new Map(routable.map(region => [region.id, []]));
+  for (let left = 0; left < routable.length; left++) {
+    const a = routable[left];
     if (!a.bbox) continue;
-    for (let right = left + 1; right < regions.length; right++) {
-      const b = regions[right];
+    for (let right = left + 1; right < routable.length; right++) {
+      const b = routable[right];
       if (!b.bbox) continue;
       const latOverlaps = a.bbox[0] - marginDegrees <= b.bbox[2]
         && b.bbox[0] - marginDegrees <= a.bbox[2];
@@ -167,7 +172,7 @@ export function roadProfileIdentity({ region, state, config, profile, rangefindV
 }
 
 export function roadIndexesCurrent({ region, state, config, rangefindVersion, requireUploaded }) {
-  if (!config.enabled) return true;
+  if (!config.enabled || !roadIndexesEnabledForRegion(region)) return true;
   return config.profiles.every(profile => {
     const identity = roadProfileIdentity({ region, state, config, profile, rangefindVersion });
     if (!identity) return false;
@@ -214,6 +219,7 @@ export function buildRoadCatalog({ regions, state, config, requireUploaded = tru
   const indexes = [];
   if (config.enabled) {
     for (const region of regions) {
+      if (!roadIndexesEnabledForRegion(region)) continue;
       for (const profile of config.profiles) {
         const profileState = state.regions?.[region.id]?.roadIndexes?.[profile] || {};
         const fingerprint = requireUploaded

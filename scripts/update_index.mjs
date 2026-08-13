@@ -124,6 +124,7 @@ import {
   normalizeRoadIndexConfig,
   planRoadObjectPrune,
   roadFederationNeighbors,
+  roadIndexesEnabledForRegion,
   roadIndexesCurrent,
   roadProfileIdentity
 } from "./lib/road_indexes.mjs";
@@ -293,6 +294,7 @@ function loadRegions(args) {
         pinned: Boolean(region.pbf),
         groups: Array.isArray(region.groups) ? region.groups.map(String) : [],
         bbox,
+        roadIndexes: region.roadIndexes !== false,
         ...regionRoutingMetadata(region),
         overrides: region.overrides || null,
         addressSources: addressSourcesForRegion(ADDRESS_SOURCES.sources, {
@@ -912,7 +914,7 @@ async function pruneRoadIndex(region, profile, profileState, keep, store) {
 
 async function ensureRoadIndexes(region, state, options, store, args, remaining) {
   const config = options.roadIndexes;
-  if (!config.enabled) return;
+  if (!config.enabled || !roadIndexesEnabledForRegion(region)) return;
   const entry = state.regions[region.id] || (state.regions[region.id] = {});
   entry.roadIndexes ||= {};
   for (const profile of config.profiles) {
@@ -1043,7 +1045,8 @@ async function publishRoadCatalog(regions, state, options, store, upload) {
     state.roadCatalogPublishedAt = new Date().toISOString();
     saveState(state);
   }
-  log(`Road catalog: ${catalog.indexes.length}/${regions.length * options.roadIndexes.profiles.length} regional profile index(es).`);
+  const total = regions.filter(roadIndexesEnabledForRegion).length * options.roadIndexes.profiles.length;
+  log(`Road catalog: ${catalog.indexes.length}/${total} regional profile index(es).`);
 }
 
 async function runRoadOnly({ regions, allRegions, state, options, store, args, remaining, outOfTime, updateProgress }) {
@@ -1821,7 +1824,7 @@ function statusSnapshot(regions, state, roadConfig = { enabled: false, profiles:
     : 0;
 
   const roadRows = roadConfig.enabled
-    ? regions.flatMap(region => roadConfig.profiles.map(profile => ({
+    ? regions.filter(roadIndexesEnabledForRegion).flatMap(region => roadConfig.profiles.map(profile => ({
         region,
         profile,
         state: state.regions[region.id]?.roadIndexes?.[profile] || {}
@@ -2061,7 +2064,7 @@ function printStatus(regions, state, roadConfig = { enabled: false, profiles: []
     ].join("  "));
   }
   if (roadConfig.enabled) {
-    const rows = regions.flatMap(region => roadConfig.profiles.map(profile => (
+    const rows = regions.filter(roadIndexesEnabledForRegion).flatMap(region => roadConfig.profiles.map(profile => (
       state.regions[region.id]?.roadIndexes?.[profile] || {}
     )));
     const built = rows.filter(entry => entry.builtFingerprint && entry.manifest).length;
@@ -2425,7 +2428,7 @@ async function main() {
               }
             }
             // The completed corpus is the only downstream build input. Keeping
-            // all ~79 GiB of downloaded PBFs until 310 shards publish can exhaust
+            // all ~79 GiB of downloaded PBFs until every shard publishes can exhaust
             // the planet-build disk while fresh JSONL and old gz snapshots
             // coexist, so reclaim each non-pinned source immediately.
             if (!region.pinned) rmSync(region.pbf, { force: true });

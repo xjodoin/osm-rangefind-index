@@ -1870,6 +1870,7 @@
     {
       "id": "ile-de-clipperton",
       "geofabrik": "australia-oceania/ile-de-clipperton",
+      "roadIndexes": false,
       "groups": [
         "australia-oceania"
       ],

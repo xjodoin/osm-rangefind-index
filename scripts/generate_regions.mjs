@@ -45,6 +45,10 @@ const EXCLUDE = new Set([
   "us-midwest", "us-northeast", "us-pacific", "us-south", "us-west" // combos over US states
 ]);
 
+// Search coverage and route coverage are independent. Keep tiny territories
+// searchable while explicitly omitting extracts with no usable road network.
+const ROAD_INDEX_EXCLUDE = new Set(["ile-de-clipperton"]);
+
 // Geofabrik's index mislabels several distinct Pacific territories with the
 // same ISO code (VU/MH as of 2026-07). They are separate extracts with wrong
 // metadata, not overlaps — exempt them from the duplicate-coverage check.
@@ -278,9 +282,10 @@ if (verify) {
 
 const output = {
   "//": existing["//"],
-  regions: regions.map(({ id, geofabrik, groups, countryCodes, subdivisionCodes, bbox }) => ({
+  regions: regions.map(({ entryId, id, geofabrik, groups, countryCodes, subdivisionCodes, bbox }) => ({
     id,
     geofabrik,
+    ...(ROAD_INDEX_EXCLUDE.has(entryId) ? { roadIndexes: false } : {}),
     ...(groups.length ? { groups } : {}),
     ...(countryCodes?.length ? { countryCodes } : {}),
     ...(subdivisionCodes?.length ? { subdivisionCodes } : {}),

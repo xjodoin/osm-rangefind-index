@@ -152,6 +152,8 @@ The route lane is incremental and resumable at region/profile boundaries:
 - a Rangefind route-format change rebuilds only road indexes, not search;
 - regions with no connected network are recorded as unavailable and omitted
   from the catalog rather than blocking the planet run;
+- a region can set `roadIndexes: false` to remain fully searchable while being
+  excluded from route extraction, federation, catalog totals, and completion;
 - the R2 garbage collector protects every catalog-referenced route prefix,
   while update-time `--prune` removes superseded objects inside that prefix.
 

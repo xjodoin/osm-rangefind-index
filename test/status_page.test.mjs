@@ -36,7 +36,7 @@ test("status metrics render large counts compactly without losing exact values",
       latestDataAt: "2026-08-10T00:00:00.000Z"
     },
     run: { state: "idle", lastSuccessfulAt: "2026-08-10T20:00:00.000Z" },
-    roadIndexes: { enabled: true, catalogEntries: 927, total: 930, uploaded: 927, unavailable: 3 }
+    roadIndexes: { enabled: true, catalogEntries: 927, total: 927, uploaded: 927, unavailable: 0 }
   };
   const context = {
     Date,
@@ -57,6 +57,6 @@ test("status metrics render large counts compactly without losing exact values",
   assert.equal(element("documents").textContent, expectedCompact);
   assert.equal(element("documents").title, `${exactDocuments} documents live`);
   assert.equal(element("documents").attributes.get("aria-label"), `${exactDocuments} documents live`);
-  assert.equal(element("roads").textContent, "927/930");
-  assert.equal(element("roads").title, "927 of 930 road graphs");
+  assert.equal(element("roads").textContent, "927/927");
+  assert.equal(element("roads").title, "927 of 927 road graphs");
 });

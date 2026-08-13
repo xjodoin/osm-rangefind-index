@@ -6,6 +6,7 @@ import {
   planRoadObjectPrune,
   roadFederationNeighbors,
   roadBuildOptions,
+  roadIndexesEnabledForRegion,
   roadIndexesCurrent,
   roadProfileIdentity
 } from "../scripts/lib/road_indexes.mjs";
@@ -61,6 +62,20 @@ test("road index configuration is generic and shard count scales with source siz
   assert.equal(roadBuildOptions(config, 2.1 * 1024 ** 3).shards, 5);
   assert.equal(roadBuildOptions(config, 20 * 1024 ** 3).shards, 8);
   assert.throws(() => normalizeRoadIndexConfig({ profiles: ["horse"] }), /car, bike, or foot/u);
+});
+
+test("a search region can opt out of every road-index surface", () => {
+  const searchOnly = { id: "clipperton", bbox: [10, -110, 11, -109], roadIndexes: false };
+  assert.equal(roadIndexesEnabledForRegion(searchOnly), false);
+  assert.equal(roadIndexesCurrent({
+    region: searchOnly,
+    state: { regions: {} },
+    config,
+    rangefindVersion: "0.5.0",
+    requireUploaded: true
+  }), true);
+  assert.equal(buildRoadCatalog({ regions: [searchOnly], state: { regions: {} }, config }).indexes.length, 0);
+  assert.equal(roadFederationNeighbors([region, searchOnly]).has("clipperton"), false);
 });
 
 test("road identities invalidate extraction and builds on their real inputs", () => {
