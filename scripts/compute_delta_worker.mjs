@@ -23,7 +23,7 @@ async function linesOf(stream) {
 
 try {
   if (!snapshotPath || !freshPath || !deltaPath) {
-    throw new Error("usage: compute_delta_worker.mjs <snapshot.jsonl.gz> <fresh.jsonl> <delta.jsonl>");
+    throw new Error("usage: compute_delta_worker.mjs <snapshot.jsonl.gz> <fresh.jsonl[.gz]> <delta.jsonl>");
   }
   const old = new Map();
   for await (const line of await linesOf(createReadStream(snapshotPath).pipe(createGunzip()))) {
@@ -35,7 +35,9 @@ try {
   let added = 0;
   let changed = 0;
   let fresh = 0;
-  for await (const line of await linesOf(createReadStream(freshPath))) {
+  const freshInput = createReadStream(freshPath);
+  const freshStream = freshPath.endsWith(".gz") ? freshInput.pipe(createGunzip()) : freshInput;
+  for await (const line of await linesOf(freshStream)) {
     if (!line) continue;
     fresh++;
     const id = lineDocId(line);

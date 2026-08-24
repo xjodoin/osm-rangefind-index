@@ -1,5 +1,5 @@
 [Unit]
-Description=OSM Rangefind nightly indexing window
+Description=OSM Rangefind manual indexing window
 After=network-online.target
 Wants=network-online.target
 
@@ -10,4 +10,3 @@ Group=ubuntu
 WorkingDirectory=/srv/osm-rangefind-index
 Environment=INDEX_LOG_FILE=logs/nightly.log
 ExecStart=/srv/osm-rangefind-index/scripts/nightly.sh --deadline 06:15
-

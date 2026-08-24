@@ -1,0 +1,10 @@
+[Unit]
+Description=Reclaim unused Docker storage before OSM Rangefind weekend indexing
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/osm-rangefind-host-cleanup
+Nice=19
+IOSchedulingClass=idle

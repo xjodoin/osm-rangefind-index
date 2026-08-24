@@ -50,3 +50,44 @@ test("computes corpus deltas in an isolated worker", async () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("streams a compressed pending corpus without materializing plain JSONL", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "corpus-delta-worker-gzip-test-"));
+  const snapshot = join(directory, "snapshot.jsonl.gz");
+  const fresh = join(directory, "fresh.pending.gz");
+  const delta = join(directory, "delta.jsonl");
+  writeFileSync(snapshot, gzipSync([
+    '{"id":"same","name":"Same"}',
+    '{"id":"changed","name":"Before"}'
+  ].join("\n") + "\n"));
+  writeFileSync(fresh, gzipSync([
+    '{"id":"same","name":"Same"}',
+    '{"id":"changed","name":"After"}',
+    '{"id":"added","name":"New"}'
+  ].join("\n") + "\n"));
+
+  try {
+    const worker = join(projectRoot, "scripts/compute_delta_worker.mjs");
+    const value = await new Promise((resolveDone, rejectDone) => {
+      let result;
+      const child = fork(worker, [snapshot, fresh, delta], {
+        stdio: ["ignore", "ignore", "inherit", "ipc"]
+      });
+      child.on("message", message => {
+        if (message?.type === "result") result = message.value;
+      });
+      child.on("error", rejectDone);
+      child.on("exit", code => {
+        if (code === 0 && result) resolveDone(result);
+        else rejectDone(new Error(`delta worker exited ${code}`));
+      });
+    });
+    assert.deepEqual(value, { deltaPath: delta, added: 1, changed: 1, deleted: 0, fresh: 3 });
+    assert.equal(await import("node:fs/promises").then(fs => fs.readFile(delta, "utf-8")), [
+      '{"id":"changed","name":"After"}',
+      '{"id":"added","name":"New"}'
+    ].join("\n") + "\n");
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

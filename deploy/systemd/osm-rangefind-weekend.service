@@ -9,5 +9,4 @@ User=ubuntu
 Group=ubuntu
 WorkingDirectory=/srv/osm-rangefind-index
 Environment=INDEX_LOG_FILE=logs/weekend.log
-ExecStart=/srv/osm-rangefind-index/scripts/nightly.sh --max-hours 54
-
+ExecStart=/srv/osm-rangefind-index/scripts/nightly.sh --max-hours 47

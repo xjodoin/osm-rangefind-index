@@ -405,16 +405,32 @@ function regionJsonlGz(region) {
   return `${regionJsonl(region)}.gz`;
 }
 
+// A refreshed corpus cannot replace the compressed snapshot until its shard
+// is durable: the old snapshot is the delta base for the currently published
+// generation. Keep the fresh corpus compressed beside it during acquisition.
+function regionPendingJsonlGz(region) {
+  return `${regionJsonl(region)}.pending.gz`;
+}
+
 function hasCorpus(region) {
-  return existsSync(regionJsonl(region)) || existsSync(regionJsonlGz(region));
+  return existsSync(regionJsonl(region))
+    || existsSync(regionPendingJsonlGz(region))
+    || existsSync(regionJsonlGz(region));
+}
+
+function regionFreshCorpusInput(region) {
+  const plain = regionJsonl(region);
+  if (existsSync(plain)) return plain;
+  const pending = regionPendingJsonlGz(region);
+  return existsSync(pending) ? pending : null;
 }
 
 function regionCorpusInput(region) {
-  const plain = regionJsonl(region);
-  if (existsSync(plain)) return plain;
+  const fresh = regionFreshCorpusInput(region);
+  if (fresh) return fresh;
   const compressed = regionJsonlGz(region);
   if (existsSync(compressed)) return compressed;
-  throw new Error(`${region.id}: no corpus (neither JSONL nor .gz) — needs refresh/extract first.`);
+  throw new Error(`${region.id}: no corpus (plain, pending, or snapshot) — needs refresh/extract first.`);
 }
 
 function roadProfileRoot(region, profile) {
@@ -449,22 +465,46 @@ function bootstrapPublicationPending(regions, state, upload) {
 async function ensurePlainJsonl(region) {
   const plain = regionJsonl(region);
   if (existsSync(plain)) return plain;
-  const gz = regionJsonlGz(region);
-  if (!existsSync(gz)) throw new Error(`${region.id}: no corpus (neither JSONL nor .gz) — needs refresh/extract first.`);
+  const gz = regionFreshCorpusInput(region) || regionJsonlGz(region);
+  if (!existsSync(gz)) throw new Error(`${region.id}: no compressed corpus — needs refresh/extract first.`);
   log(`${region.id}: decompressing corpus snapshot`);
   await pipeline(createReadStream(gz), createGunzip(), createWriteStream(`${plain}.tmp`));
   renameSync(`${plain}.tmp`, plain);
   return plain;
 }
 
-async function compressJsonl(region) {
+// Compress a refreshed corpus without replacing the old shard's diff base.
+// This runs as each acquisition finishes, bounding steady disk growth by the
+// compressed pending corpus instead of retaining planet-scale plain JSONL.
+async function compressPendingJsonl(region) {
   const plain = regionJsonl(region);
   if (!existsSync(plain)) return;
-  const gz = regionJsonlGz(region);
-  log(`${region.id}: compressing corpus snapshot`);
-  await pipeline(createReadStream(plain), createGzip({ level: 6 }), createWriteStream(`${gz}.tmp`));
-  renameSync(`${gz}.tmp`, gz);
+  const pending = regionPendingJsonlGz(region);
+  log(`${region.id}: compressing pending corpus`);
+  await pipeline(createReadStream(plain), createGzip({ level: 6 }), createWriteStream(`${pending}.tmp`));
+  renameSync(`${pending}.tmp`, pending);
   rmSync(plain, { force: true });
+}
+
+async function compressJsonl(region) {
+  const plain = regionJsonl(region);
+  const gz = regionJsonlGz(region);
+  if (existsSync(plain)) {
+    log(`${region.id}: compressing corpus snapshot`);
+    await pipeline(createReadStream(plain), createGzip({ level: 6 }), createWriteStream(`${gz}.tmp`));
+    renameSync(`${gz}.tmp`, gz);
+    rmSync(plain, { force: true });
+    rmSync(regionPendingJsonlGz(region), { force: true });
+  } else {
+    const pending = regionPendingJsonlGz(region);
+    if (existsSync(pending)) {
+      // Promotion happens only after the corresponding shard is uploaded.
+      // rename(2) atomically replaces the old delta base on this filesystem.
+      renameSync(pending, gz);
+      log(`${region.id}: promoted pending corpus to published snapshot`);
+    }
+  }
+  rmSync(`${regionPendingJsonlGz(region)}.tmp`, { force: true });
 }
 
 // extractOsmPlaces keeps resumable stage outputs beside the final corpus.
@@ -475,7 +515,10 @@ function cleanupExtractionScratch(region) {
   const dataDir = join(regionWorkRoot(region), "data");
   if (!existsSync(dataDir)) return;
   const prefixes = [
+    "osm-boundary-relations.",
+    "osm-boundary-ways.",
     "osm-node-docs.",
+    "osm-place-nodes.",
     "osm-way-candidates.",
     "osm-way-anchor-coords.",
     "osm-way-anchors."
@@ -505,7 +548,8 @@ function cleanupFailedAcquisition(region) {
     `${region.pbf}.download`,
     `${regionJsonl(region)}.partial`,
     `${regionJsonl(region)}.tmp`,
-    `${regionJsonlGz(region)}.tmp`
+    `${regionJsonlGz(region)}.tmp`,
+    `${regionPendingJsonlGz(region)}.tmp`
   ]) rmSync(path, { force: true });
   if (existsSync(dataDir)) {
     for (const name of readdirSync(dataDir)) {
@@ -572,7 +616,7 @@ function recoverCompletedEnrichedCorpus(region, state) {
     && regionAddressSourceIdentity(meta.sources) === enrichmentIdentity;
   const validOutput = existsSync(enriched)
     ? statSync(enriched).size === Number(meta?.bytes)
-    : existsSync(`${enriched}.gz`);
+    : existsSync(`${enriched}.pending.gz`) || existsSync(`${enriched}.gz`);
   const rejectionReasons = [
     Number(meta?.schemaVersion) === 1 ? "" : "metadata schema",
     Number(meta?.totalDocs) > 0 ? "" : "document count",
@@ -1193,9 +1237,11 @@ async function runRoadOnly({ regions, allRegions, state, options, store, args, r
 async function computeDelta(region) {
   const deltaPath = join(regionWorkRoot(region), "data/delta.jsonl");
   const heapMb = Math.max(4096, Math.min(24576, Number(process.env.CORPUS_DIFF_HEAP_MB || 16384) || 16384));
+  const fresh = regionFreshCorpusInput(region);
+  if (!fresh) throw new Error(`${region.id}: no fresh corpus to diff against the published snapshot`);
   return runIpcWorker(
     CORPUS_DELTA_WORKER,
-    [regionJsonlGz(region), regionJsonl(region), deltaPath],
+    [regionJsonlGz(region), fresh, deltaPath],
     heapMb
   );
 }
@@ -1326,7 +1372,7 @@ async function planShardBuild(region, options, state) {
   }
   if (entry.builtStats !== statsFingerprint()) return full("stats artifact changed");
   if (!existsSync(regionJsonlGz(region))) return full("no corpus snapshot to diff against");
-  if (!existsSync(regionJsonl(region))) return full("no fresh extraction");
+  if (!regionFreshCorpusInput(region)) return full("no fresh extraction");
   const generations = shardGenerationCount(region);
   if (generations + 1 > options.maxGenerations) return full(`generation cap (${generations})`);
 
@@ -2425,6 +2471,10 @@ async function main() {
                 // the acquisition footprint near the gzipped corpus total
                 // instead of hundreds of GB of PBFs + plain JSONL.
                 await compressJsonl(region);
+              } else {
+                // Keep the old compressed snapshot as the published shard's
+                // delta base, but never retain the fresh planet corpus plain.
+                await compressPendingJsonl(region);
               }
             }
             // The completed corpus is the only downstream build input. Keeping

@@ -272,21 +272,31 @@ merge. It reuses existing scoring stats, built shard manifests, and
 checkpointed term/suggest sidecars; it does not download PBFs or build shard
 updates. Normal scheduled runs remain unchanged.
 
-## Scheduling (cron)
+## Scheduling (systemd)
 
-```cron
-# Weeknights: start 20:00, hand the server back before 06:15.
-0 20 * * 0-4   /usr/bin/env INDEX_LOG_FILE=logs/nightly.log /srv/osm-rangefind-index/scripts/nightly.sh --deadline 06:15
+Production indexing is weekend-only. The weekend timer starts Saturday at
+00:15 Montreal time and gives the resumable pipeline 47 hours, stopping by
+Sunday at 23:15 before the work week. There is intentionally no weekday timer;
+`osm-rangefind-nightly.service` remains available only for an explicit manual
+maintenance run.
 
-# Weekend: start Saturday 00:15, run up to 54h (until ~Mon 06:15).
-15 0 * * 6     /usr/bin/env INDEX_LOG_FILE=logs/weekend.log /srv/osm-rangefind-index/scripts/nightly.sh --max-hours 54
+The host cleanup timer runs Friday at 23:00, before indexing. It takes the same
+launcher lock as the indexer and skips safely if maintenance is already active,
+then prunes unused Docker images, build cache, containers, networks, and named
+volumes. Docker objects attached to running containers are preserved.
+
+```bash
+sudo install -m 0755 scripts/host_cleanup.sh /usr/local/sbin/osm-rangefind-host-cleanup
+sudo install -m 0644 deploy/systemd/osm-rangefind-{host-cleanup,weekend}.{service,timer} /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now osm-rangefind-host-cleanup.timer osm-rangefind-weekend.timer
+sudo systemctl disable --now osm-rangefind-nightly.timer 2>/dev/null || true
 ```
 
-A lockfile prevents overlapping runs (a weekend run still going Monday keeps
-the nightly one from starting). `nightly.sh` runs everything under
-`nice`/`ionice`, so an early return of daytime load mostly just slows the
-build. The launcher tees all progress and errors to `logs/indexing.log` by
-default; `INDEX_LOG_FILE` selects a different file as shown above.
+The shared lock prevents manual and scheduled maintenance from overlapping.
+`nightly.sh` runs the indexer under `nice`/`ionice` and tees progress and errors
+to `logs/indexing.log` by default; each service selects its own log file with
+`INDEX_LOG_FILE`.
 
 ## How incremental updates work
 
@@ -316,6 +326,14 @@ Regenerating the stats artifact intentionally invalidates **all** shards
 between regenerations, updated regions stay exactly comparable with
 untouched shards. Drift only shifts idf slightly, and 10% corpus growth is
 years of OSM edits for most regions.
+
+Fresh incremental corpora are compressed immediately as `*.pending.gz` while
+the previous compressed snapshot remains the delta base for the live shard.
+The delta worker streams both gzip files directly, so a planet acquisition
+does not accumulate hundreds of gigabytes of plain JSONL. After the updated
+shard is safely uploaded, cleanup atomically promotes the pending corpus to the
+new snapshot and removes extractor stage files. An interrupted run therefore
+resumes from compressed artifacts without expanding the steady disk footprint.
 
 Builder identity and logical corpus identity are tracked separately. An
 encoding-only Rangefind upgrade forces correct shard rewrites while retaining

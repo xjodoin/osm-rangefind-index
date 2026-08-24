@@ -1,0 +1,10 @@
+[Unit]
+Description=Clean host disk before OSM Rangefind weekend indexing (Montreal time)
+
+[Timer]
+OnCalendar=Fri *-*-* 23:00:00 America/Montreal
+AccuracySec=5min
+Unit=osm-rangefind-host-cleanup.service
+
+[Install]
+WantedBy=timers.target
