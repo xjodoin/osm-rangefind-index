@@ -51,6 +51,46 @@ test("computes corpus deltas in an isolated worker", async () => {
   }
 });
 
+test("treats repeated ids like the Map it replaced", async () => {
+  const directory = mkdtempSync(join(tmpdir(), "corpus-delta-worker-dup-test-"));
+  const snapshot = join(directory, "snapshot.jsonl.gz");
+  const fresh = join(directory, "fresh.jsonl");
+  const delta = join(directory, "delta.jsonl");
+  // The last snapshot line for an id is the one compared; a second fresh line
+  // for an already-matched id is emitted as added.
+  writeFileSync(snapshot, gzipSync([
+    '{"id":"dup","name":"First"}',
+    '{"id":"dup","name":"Last"}'
+  ].join("\n") + "\n"));
+  writeFileSync(fresh, [
+    '{"id":"dup","name":"Last"}',
+    '{"id":"dup","name":"Again"}'
+  ].join("\n") + "\n");
+
+  try {
+    const worker = join(projectRoot, "scripts/compute_delta_worker.mjs");
+    const value = await new Promise((resolveDone, rejectDone) => {
+      let result;
+      const child = fork(worker, [snapshot, fresh, delta], {
+        stdio: ["ignore", "ignore", "inherit", "ipc"]
+      });
+      child.on("message", message => {
+        if (message?.type === "result") result = message.value;
+      });
+      child.on("error", rejectDone);
+      child.on("exit", code => {
+        if (code === 0 && result) resolveDone(result);
+        else rejectDone(new Error(`delta worker exited ${code}`));
+      });
+    });
+    assert.deepEqual(value, { deltaPath: delta, added: 1, changed: 0, deleted: 0, fresh: 2 });
+    assert.equal(await import("node:fs/promises").then(fs => fs.readFile(delta, "utf-8")),
+      '{"id":"dup","name":"Again"}\n');
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("streams a compressed pending corpus without materializing plain JSONL", async () => {
   const directory = mkdtempSync(join(tmpdir(), "corpus-delta-worker-gzip-test-"));
   const snapshot = join(directory, "snapshot.jsonl.gz");
