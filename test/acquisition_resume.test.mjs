@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   acquisitionSessionSignature,
+  frozenPbfIdentity,
   openAcquisitionSession,
   recordAcquisitionFailure,
-  recordAcquisitionSuccess
+  recordAcquisitionSuccess,
+  recordPbfIdentity
 } from "../scripts/lib/acquisition_resume.mjs";
 
 test("acquisition sessions resume only the same immutable run", () => {
@@ -39,4 +41,18 @@ test("resumed sessions discard regions removed from configuration", () => {
 
   const resumed = openAcquisitionSession(current, "same", ["b"]);
   assert.deepEqual(resumed.session.completedRegionIds, ["b"]);
+});
+
+test("a resumed cycle keeps the PBF it first downloaded", () => {
+  const first = openAcquisitionSession(null, "same", ["brazil"]).session;
+  assert.equal(frozenPbfIdentity(first, "brazil"), "");
+  recordPbfIdentity(first, "brazil", "Mon, 17 Aug 2026 23:16:27 GMT");
+  recordPbfIdentity(first, "brazil", "");
+
+  const resumed = openAcquisitionSession(JSON.parse(JSON.stringify(first)), "same", ["brazil"]);
+  assert.equal(resumed.resumed, true);
+  assert.equal(frozenPbfIdentity(resumed.session, "brazil"), "Mon, 17 Aug 2026 23:16:27 GMT");
+
+  const nextCycle = openAcquisitionSession(resumed.session, "changed", ["brazil"]);
+  assert.equal(frozenPbfIdentity(nextCycle.session, "brazil"), "");
 });

@@ -55,7 +55,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { availableParallelism, hostname } from "node:os";
 import { pipeline } from "node:stream/promises";
 import { setTimeout as delay } from "node:timers/promises";
-import { createGunzip, createGzip } from "node:zlib";
+import { createGunzip } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import { collectScoringStats, loadScoringStats } from "rangefind/scoring-stats";
 import { writeShardedRootManifest } from "rangefind/shards";
@@ -91,9 +91,11 @@ import {
 import { fetchSource } from "./lib/source_fetch.mjs";
 import {
   acquisitionSessionSignature,
+  frozenPbfIdentity,
   openAcquisitionSession,
   recordAcquisitionFailure,
-  recordAcquisitionSuccess
+  recordAcquisitionSuccess,
+  recordPbfIdentity
 } from "./lib/acquisition_resume.mjs";
 import {
   buildContentFingerprint,
@@ -160,6 +162,18 @@ const CORPUS_DELTA_WORKER = join(projectRoot, "scripts/compute_delta_worker.mjs"
 const ROAD_INDEX_WORKER = join(projectRoot, "scripts/road_index_worker.mjs");
 const OSM_EXTRACT_WORKER = join(projectRoot, "scripts/osm_extract_worker.mjs");
 const ADDRESS_ENRICHMENT_WORKER = join(projectRoot, "scripts/address_enrichment_worker.mjs");
+const CORPUS_COMPRESS_WORKER = join(projectRoot, "scripts/compress_corpus_worker.mjs");
+// Candidate cache for address enrichment: ~0.5x the civic share of each
+// region's compressed corpus on disk, in exchange for skipping source parsing
+// and SQLite dedupe when a region's addresses did not change. Set
+// ADDRESS_CANDIDATE_CACHE=0 to trade the time back for disk.
+const ADDRESS_CANDIDATE_CACHE = process.env.ADDRESS_CANDIDATE_CACHE !== "0";
+// Threads per snapshot compression. Several region workers can compress at
+// once alongside extraction, so the default takes half the host, capped at 8.
+const CORPUS_GZIP_THREADS = Math.max(
+  1,
+  Math.min(32, Number(process.env.CORPUS_GZIP_THREADS) || Math.min(8, Math.floor(availableParallelism() / 2)))
+);
 const SOURCE_REQUEST_TIMEOUT_MS = Math.max(
   1_000,
   Number(process.env.SOURCE_REQUEST_TIMEOUT_MS || 30_000)
@@ -473,6 +487,21 @@ async function ensurePlainJsonl(region) {
   return plain;
 }
 
+// Gzip level 6 in parallel 16 MiB members (scripts/lib/parallel_gzip.mjs):
+// same ratio as single-threaded createGzip, ~7x faster with 8 threads. Every
+// reader goes through Node's createGunzip, which reads multi-member streams.
+async function compressCorpus(region, plain, output) {
+  const started = Date.now();
+  const { inputBytes, outputBytes } = await runIpcWorker(
+    CORPUS_COMPRESS_WORKER,
+    [plain, output, "6", String(CORPUS_GZIP_THREADS)],
+    1024,
+    `compress ${region.id}`,
+    { UV_THREADPOOL_SIZE: String(CORPUS_GZIP_THREADS + 1) }
+  );
+  log(`${region.id}: compressed ${(inputBytes / 1024 ** 3).toFixed(1)} GiB -> ${(outputBytes / 1024 ** 3).toFixed(1)} GiB in ${((Date.now() - started) / 1000).toFixed(0)}s (${CORPUS_GZIP_THREADS} threads)`);
+}
+
 // Compress a refreshed corpus without replacing the old shard's diff base.
 // This runs as each acquisition finishes, bounding steady disk growth by the
 // compressed pending corpus instead of retaining planet-scale plain JSONL.
@@ -481,7 +510,7 @@ async function compressPendingJsonl(region) {
   if (!existsSync(plain)) return;
   const pending = regionPendingJsonlGz(region);
   log(`${region.id}: compressing pending corpus`);
-  await pipeline(createReadStream(plain), createGzip({ level: 6 }), createWriteStream(`${pending}.tmp`));
+  await compressCorpus(region, plain, `${pending}.tmp`);
   renameSync(`${pending}.tmp`, pending);
   rmSync(plain, { force: true });
 }
@@ -491,7 +520,7 @@ async function compressJsonl(region) {
   const gz = regionJsonlGz(region);
   if (existsSync(plain)) {
     log(`${region.id}: compressing corpus snapshot`);
-    await pipeline(createReadStream(plain), createGzip({ level: 6 }), createWriteStream(`${gz}.tmp`));
+    await compressCorpus(region, plain, `${gz}.tmp`);
     renameSync(`${gz}.tmp`, gz);
     rmSync(plain, { force: true });
     rmSync(regionPendingJsonlGz(region), { force: true });
@@ -712,9 +741,20 @@ async function prepareRegionAddressSources(region, regions, { reuseCached = fals
   region.enrichmentIdentity = regionAddressSourceIdentity(region.preparedAddressSources);
 }
 
-async function refreshPbf(region, state, { roadIndexes = null, requireRoadUpload = true } = {}) {
+async function refreshPbf(region, state, { roadIndexes = null, requireRoadUpload = true, frozenLastModified = "" } = {}) {
   if (region.pinned) {
     if (!existsSync(region.pbf)) throw new Error(`${region.id}: pinned PBF missing at ${region.pbf}`);
+    return { bytes: statSync(region.pbf).size };
+  }
+  // Within one acquisition cycle the first downloaded PBF is authoritative:
+  // a resumed run must not discard it (and any extraction checkpoints keyed
+  // to it) because Geofabrik published a newer file overnight.
+  const frozenEntry = state.regions[region.id] || {};
+  if (frozenLastModified
+      && frozenLastModified === frozenEntry.pbfLastModified
+      && existsSync(region.pbf)
+      && (!frozenEntry.pbfBytes || statSync(region.pbf).size === Number(frozenEntry.pbfBytes))) {
+    log(`${region.id}: reusing this cycle's PBF (${frozenLastModified})`);
     return { bytes: statSync(region.pbf).size };
   }
   const url = `https://download.geofabrik.de/${region.geofabrik}-latest.osm.pbf`;
@@ -770,9 +810,17 @@ async function refreshPbf(region, state, { roadIndexes = null, requireRoadUpload
     }).catch(rejectDone);
     pump();
   });
+  const downloaded = statSync(tmp).size;
+  if (bytes && downloaded !== bytes) {
+    rmSync(tmp, { force: true });
+    throw new Error(`${region.id}: PBF download truncated (${downloaded} of ${bytes} bytes)`);
+  }
   renameSync(tmp, region.pbf);
-  state.regions[region.id] = { ...state.regions[region.id], pbfLastModified: lastModified, pbfBytes: bytes };
-  return { bytes };
+  state.regions[region.id] = { ...state.regions[region.id], pbfLastModified: lastModified, pbfBytes: bytes || downloaded };
+  // Persist now: a run killed mid-extraction must still know which upstream
+  // file is on disk, or the next run re-downloads it.
+  saveState(state);
+  return { bytes: bytes || downloaded };
 }
 
 // --- step 2: extract JSONL ---------------------------------------------------
@@ -831,7 +879,12 @@ async function enrichOsmCorpus(region, osmMeta) {
       osmPath: regionOsmCorpusInput(region),
       outputPath: regionJsonl(region),
       sources: region.preparedAddressSources,
-      osmDocs: Number(osmMeta.docs || 0)
+      osmDocs: Number(osmMeta.docs || 0),
+      // Source-only enrichment work replayed when this region's addresses are
+      // unchanged (needs rangefind >= 0.5.1; older releases ignore it).
+      candidateCachePath: ADDRESS_CANDIDATE_CACHE
+        ? join(regionWorkRoot(region), "data", "address-candidates.jsonl.gz")
+        : null
     })],
     Math.max(2048, Math.min(16384, Number(process.env.ADDRESS_ENRICHMENT_HEAP_MB || 8192) || 8192)),
     `address enrichment ${region.id}`
@@ -1522,12 +1575,13 @@ function writeWorkerConfig(name, value) {
   return path;
 }
 
-function runIpcWorker(worker, args, heapMb, label = "worker") {
+function runIpcWorker(worker, args, heapMb, label = "worker", env = null) {
   return new Promise((resolveDone, rejectDone) => {
     let result;
     const child = fork(worker, args, {
       execArgv: [`--max-old-space-size=${heapMb}`],
-      stdio: ["ignore", "inherit", "inherit", "ipc"]
+      stdio: ["ignore", "inherit", "inherit", "ipc"],
+      ...(env ? { env: { ...process.env, ...env } } : {})
     });
     child.on("message", message => {
       if (message?.type === "result") result = message.value;
@@ -2382,8 +2436,13 @@ async function main() {
             await prepareRegionAddressSources(region, allRegions, { reuseCached: resumedAcquisition });
             const source = await withDownloadCapacity(1, () => refreshPbf(region, state, {
               roadIndexes: options.roadIndexes,
-              requireRoadUpload: args.upload
+              requireRoadUpload: args.upload,
+              frozenLastModified: frozenPbfIdentity(acquisitionSession, region.id)
             }));
+            if (!region.pinned) {
+              recordPbfIdentity(acquisitionSession, region.id, state.regions[region.id]?.pbfLastModified);
+              saveState(state);
+            }
             const recovered = extractedCorpusCurrent(region, state)
               || recoverCompletedEnrichedCorpus(region, state);
             const large = source.bytes >= options.largePbfBytes;

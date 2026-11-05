@@ -51,3 +51,19 @@ export function recordAcquisitionFailure(session, regionId, error, attempt, now 
   };
   session.updatedAt = now;
 }
+
+// The upstream PBF a region downloaded within this acquisition cycle. A
+// resumed cycle reuses that file instead of chasing a newer Geofabrik
+// release: the newer data waits for the next cycle, and an interrupted
+// extraction keeps its PBF (and stage checkpoints) instead of restarting.
+export function frozenPbfIdentity(session, regionId) {
+  return session?.pbfIdentities?.[regionId] || "";
+}
+
+export function recordPbfIdentity(session, regionId, identity, now = new Date().toISOString()) {
+  if (!session || !identity) return;
+  session.pbfIdentities ||= {};
+  if (session.pbfIdentities[regionId] === identity) return;
+  session.pbfIdentities[regionId] = identity;
+  session.updatedAt = now;
+}

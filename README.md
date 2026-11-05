@@ -97,6 +97,14 @@ admit more concurrency. Configure the hard lane count with
 with `acquisitionPipelineWorkers`, optional worker heaps with
 `OSM_EXTRACT_HEAP_MB` and `ADDRESS_ENRICHMENT_HEAP_MB`, and pressure thresholds
 with `INDEX_PIPELINE_MIN_AVAILABLE_GIB` and `INDEX_PIPELINE_MAX_MEMORY_PSI`.
+Address enrichment keeps a per-region candidate cache
+(`data/address-candidates.jsonl.gz`, rangefind ≥ 0.5.1) keyed by the content
+hash of the region's address partition, not the provider's global snapshot
+id — so a weekly PBF refresh whose addresses did not change replays the
+cached civic candidates against the new OSM address keys instead of
+re-parsing and re-deduplicating every source row (~10x faster, byte-identical
+output). Estimated 15–25 GB across the planet (536M civic candidates); set
+`ADDRESS_CANDIDATE_CACHE=0` to trade that disk back for time.
 Every stage logs its queue delay, elapsed time, weight, and active lane count.
 Disk reservations remain held through corpus compression, source deletion, and
 scratch cleanup. A region that cannot fit waits for active cleanup leases to
@@ -302,7 +310,7 @@ to `logs/indexing.log` by default; each service selects its own log file with
 
 | Step | Trigger | Cost when unchanged |
 |---|---|---|
-| PBF download | Geofabrik `Last-Modified` changed | one HEAD request |
+| PBF download | Geofabrik `Last-Modified` changed (once per acquisition cycle) | one HEAD request |
 | JSONL extract | PBF version changed | skipped |
 | road graph/index | PBF, profile, road options, or Rangefind route builder changed | none |
 | scoring stats | region set changed, corpus drift > `statsDriftRatio` (default 10%), or `--force-stats` | none |
@@ -327,10 +335,23 @@ between regenerations, updated regions stay exactly comparable with
 untouched shards. Drift only shifts idf slightly, and 10% corpus growth is
 years of OSM edits for most regions.
 
+Within one acquisition cycle the first PBF a region downloads is frozen: a
+cycle resumed after a deadline or crash reuses that file (and the extractor
+checkpoints keyed to it) instead of restarting extraction because Geofabrik
+published a newer file overnight. The newer data waits for the next cycle.
+Downloads are checked against `Content-Length` and persisted to state as
+soon as they land.
+
 Fresh incremental corpora are compressed immediately as `*.pending.gz` while
 the previous compressed snapshot remains the delta base for the live shard.
-The delta worker streams both gzip files directly, so a planet acquisition
-does not accumulate hundreds of gigabytes of plain JSONL. After the updated
+Compression runs in a child process as parallel 16 MiB gzip members (level 6,
+`CORPUS_GZIP_THREADS` threads, default half the cores capped at 8) — the
+same ratio as single-threaded gzip, ~6x faster; every reader uses Node's
+multi-member-aware `createGunzip`. The delta worker streams both gzip files
+directly, so a planet acquisition does not accumulate hundreds of gigabytes
+of plain JSONL. It indexes the snapshot in a typed-array hash table rather
+than a `Map`, whose 2^24-entry cap the largest shards (brazil ~67M docs)
+exceed. After the updated
 shard is safely uploaded, cleanup atomically promotes the pending corpus to the
 new snapshot and removes extractor stage files. An interrupted run therefore
 resumes from compressed artifacts without expanding the steady disk footprint.
