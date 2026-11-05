@@ -422,6 +422,13 @@ function regionJsonlGz(region) {
 // A refreshed corpus cannot replace the compressed snapshot until its shard
 // is durable: the old snapshot is the delta base for the currently published
 // generation. Keep the fresh corpus compressed beside it during acquisition.
+// Address-enrichment candidate cache (rangefind >= 0.5.1). It must outlive
+// cleanupRegion: its whole point is to be replayed by the NEXT cycle's
+// enrichment, after this cycle's shard is uploaded and the region gutted.
+function regionCandidateCache(region) {
+  return join(regionWorkRoot(region), "data", "address-candidates.jsonl.gz");
+}
+
 function regionPendingJsonlGz(region) {
   return `${regionJsonl(region)}.pending.gz`;
 }
@@ -882,9 +889,7 @@ async function enrichOsmCorpus(region, osmMeta) {
       osmDocs: Number(osmMeta.docs || 0),
       // Source-only enrichment work replayed when this region's addresses are
       // unchanged (needs rangefind >= 0.5.1; older releases ignore it).
-      candidateCachePath: ADDRESS_CANDIDATE_CACHE
-        ? join(regionWorkRoot(region), "data", "address-candidates.jsonl.gz")
-        : null
+      candidateCachePath: ADDRESS_CANDIDATE_CACHE ? regionCandidateCache(region) : null
     })],
     Math.max(2048, Math.min(16384, Number(process.env.ADDRESS_ENRICHMENT_HEAP_MB || 8192) || 8192)),
     `address enrichment ${region.id}`
@@ -2104,13 +2109,19 @@ function pruneShardDir(region) {
 
 // After a shard is safely on R2, local disk keeps only what the next update
 // needs: the compressed corpus snapshot (diff base + stats regeneration
-// input), the extraction meta, shard manifests, and generation id-maps.
+// input), the extraction meta, the address candidate cache, shard
+// manifests, and generation id-maps. With the cache disabled it is deleted
+// here too, so ADDRESS_CANDIDATE_CACHE=0 also reclaims its disk.
 // PBFs re-download only when Geofabrik publishes a new version.
 async function cleanupRegion(region, state) {
   if (!region.pinned) rmSync(region.pbf, { force: true });
   await compressJsonl(region);
   const dataDir = join(regionWorkRoot(region), "data");
   const keep = new Set([`${basename(regionJsonl(region))}.gz`, "osm-places.meta.json"]);
+  if (ADDRESS_CANDIDATE_CACHE) {
+    keep.add(basename(regionCandidateCache(region)));
+    keep.add(`${basename(regionCandidateCache(region))}.meta.json`);
+  }
   if (existsSync(dataDir)) {
     for (const name of readdirSync(dataDir)) {
       if (!keep.has(name)) rmSync(join(dataDir, name), { recursive: true, force: true });

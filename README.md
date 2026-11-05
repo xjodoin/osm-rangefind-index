@@ -103,8 +103,10 @@ hash of the region's address partition, not the provider's global snapshot
 id — so a weekly PBF refresh whose addresses did not change replays the
 cached civic candidates against the new OSM address keys instead of
 re-parsing and re-deduplicating every source row (~10x faster, byte-identical
-output). Estimated 15–25 GB across the planet (536M civic candidates); set
-`ADDRESS_CANDIDATE_CACHE=0` to trade that disk back for time.
+output). The cache survives post-upload cleanup — it is only useful to the
+next cycle — and costs an estimated 15–25 GB across the planet (536M civic
+candidates); set `ADDRESS_CANDIDATE_CACHE=0` to trade that disk back for
+time (cleanup then deletes any existing caches).
 Every stage logs its queue delay, elapsed time, weight, and active lane count.
 Disk reservations remain held through corpus compression, source deletion, and
 scratch cleanup. A region that cannot fit waits for active cleanup leases to
